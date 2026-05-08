@@ -1,27 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design Tokens ── */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #f8fafc;
+  --sidebar: #ffffff;
+  --card: #ffffff;
+  --border: #f0f2f8;
+  --text: #0f172a;
+  --text-sub: #64748b;
+  --text-muted: #94a3b8;
+  --nav-hover: #f1f5f9;
+  --bar-bg: #f1f5f9;
+
+  --brand-blue: #1a3a8f;
+  --brand-red: #d42020;
+
+  --green: #22c55e;
+  --green-dark: #16a34a;
+  --amber: #f59e0b;
+  --orange: #f97316;
+  --red: #ef4444;
+  --red-dark: #dc2626;
+  --blue-light: #60a5fa;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --bg: #0f1623;
+  --sidebar: #141c2e;
+  --card: #1a2438;
+  --border: #1e2d47;
+  --text: #f0f4ff;
+  --text-sub: #8ba3c7;
+  --text-muted: #4e6585;
+  --nav-hover: #1e2d47;
+  --bar-bg: #1e2d47;
 }
+
+/* ── Base ── */
+* { box-sizing: border-box; }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Inter', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  transition: background 0.3s, color 0.3s;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
+/* ── Transitions ── */
+.theme-transition,
+.theme-transition * {
+  transition: background-color 0.3s, border-color 0.3s, color 0.3s !important;
 }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ── Table scroll ── */
+.table-scroll { overflow-x: auto; overflow-y: auto; max-height: 340px; }
+
+/* ── Animated bars ── */
+@keyframes barExpand {
+  from { width: 0% !important; }
+  to { width: var(--bar-width); }
+}
+.bar-animated {
+  animation: barExpand 0.8s cubic-bezier(.4,0,.2,1) 0.2s both;
+}
+
+/* ── Fade animations ── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in-up { animation: fadeInUp 0.25s ease both; }
+
+/* ── Number font ── */
+.num { font-family: 'DM Mono', monospace; }
