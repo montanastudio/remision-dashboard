@@ -78,7 +78,7 @@ const CIUDAD_FALLBACK: Record<string, string> = {
   // Boyacá
   'sogamoso': '15', 'duitama': '15', 'chiquinquira': '15', 'soata': '15', 'socha': '15',
   // Antioquia (adicionales)
-  'san pedro de los milagros': '05', 'lorica': '23',
+  'san pedro de los milagros': '05',
   // Cundinamarca
   'zipaquira': '25', 'chia': '25', 'cajica': '25', 'facatativa': '25',
   'fusagasuga': '25', 'girardot': '25', 'mosquera': '25', 'soacha': '25',
