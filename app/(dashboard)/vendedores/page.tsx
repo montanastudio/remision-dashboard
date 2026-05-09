@@ -1,6 +1,6 @@
 import { getSheetData, rowsToObjects, parseNum, parseFecha } from '@/lib/sheets'
 import { filtrarVentas } from '@/lib/filtro-ventas'
-import { fmt, fmtN } from '@/lib/format'
+import { fmt } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
 import Card from '@/components/Card'
 import MetasGauges from './MetasGauges'

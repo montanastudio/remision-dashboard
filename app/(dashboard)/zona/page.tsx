@@ -112,9 +112,6 @@ const CIUDAD_FALLBACK: Record<string, string> = {
  */
 function extractCod(ciudad: string): string {
   if (!ciudad.trim()) return ''
-  const normFull = norm(ciudad)
-  const parts    = ciudad.toUpperCase().trim().split(/\s+/)
-
   // Normalizar guiones como espacios (ej. "MEDELLIN-ANTIOQUIA" → "MEDELLIN ANTIOQUIA")
   const clean = ciudad.toUpperCase().trim().replace(/-/g, ' ')
   const cleanNorm = norm(clean)

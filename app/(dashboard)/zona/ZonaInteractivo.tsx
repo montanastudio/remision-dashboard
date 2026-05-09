@@ -47,7 +47,7 @@ export default function ZonaInteractivo({ detalle, detalleHeaders, totalValor, c
     e.stopPropagation()
     setCoberturaOpen(prev => {
       const next = new Set(prev)
-      next.has(zonaId) ? next.delete(zonaId) : next.add(zonaId)
+      if (next.has(zonaId)) { next.delete(zonaId) } else { next.add(zonaId) }
       return next
     })
   }
