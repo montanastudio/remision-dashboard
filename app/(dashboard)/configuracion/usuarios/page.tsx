@@ -7,6 +7,7 @@ import Card from '@/components/Card'
 import Badge from '@/components/Badge'
 import NuevoUsuarioForm from './NuevoUsuarioForm'
 import CambiarPasswordForm from './CambiarPasswordForm'
+import SeedMetasButton from './SeedMetasButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,6 +116,10 @@ export default async function UsuariosPage() {
           El ícono <span className="inline-block align-middle">🔒</span> permite cambiar la contraseña de cualquier usuario.
         </p>
       </div>
+
+      <Card title="Herramientas de datos" subtitle="acciones sobre Google Sheets · solo administrador" className="mt-4">
+        <SeedMetasButton />
+      </Card>
     </div>
   )
 }

@@ -33,6 +33,7 @@ export type SheetName =
   | 'LS_Permisos'
   | 'LS METAS Y PROYECCION'
   | 'LS_METAS_VENDEDORES'
+  | 'LS_METAS_VENDEDOR'
   | 'LS_MINIMOS'
 
 export async function getSheetData(sheetName: SheetName): Promise<string[][]> {
@@ -81,7 +82,7 @@ export async function setSheetData(sheetName: SheetName, values: string[][]): Pr
   await sheets.spreadsheets.values.update({
     spreadsheetId: SPREADSHEET_ID,
     range: `${sheetName}!A1`,
-    valueInputOption: 'RAW',
+    valueInputOption: 'USER_ENTERED',
     requestBody: { values },
   })
 }

@@ -3,7 +3,7 @@ import { filtrarVentas } from '@/lib/filtro-ventas'
 import { fmt, fmtN } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
 import Card from '@/components/Card'
-import VendedorMetaCard from './VendedorMetaCard'
+import MetasGauges from './MetasGauges'
 import VendedoresInteractivo from './VendedoresInteractivo'
 
 export const dynamic = 'force-dynamic'
@@ -48,6 +48,11 @@ export default async function VendedoresPage({
     const mt = await getSheetData('LS METAS Y PROYECCION')
     metasRows = rowsToObjects(mt)
   } catch { /* hoja aún no existe */ }
+
+  let metasVendedor: Row[] = []
+  try {
+    metasVendedor = rowsToObjects(await getSheetData('LS_METAS_VENDEDOR'))
+  } catch { /* hoja no existe aún */ }
 
   // ── Detectar año más reciente en los datos ───────────────────────────
   let maxYear = 0
@@ -136,13 +141,47 @@ export default async function VendedoresPage({
   const metaMensual = total2026 / 12
   const metaYTD     = metaMensual * mesActualN
 
-  // Gauges por vendedor objetivo
-  const gauges = VENDEDORES_OBJETIVO.map(vo => {
-    const vendedoresMatch = vds.filter(v => matchVendor(v.Vendedor, vo.match))
-    const actual = vendedoresMatch.reduce((s, v) => s + v['Valor ($)'], 0)
-    const proporcion = totalActual > 0 ? actual / totalActual : 1 / VENDEDORES_OBJETIVO.length
-    const metaVendedor = metaYTD > 0 ? metaYTD * proporcion : actual * (1 + metaPct)
-    return { label: vo.label, color: vo.color, actual, meta: metaVendedor, proporcion }
+  const MESES_COLS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+
+  // ── Ventas reales del año actual por vendedor × mes (ignora filtro global) ──
+  const actualPorMesMap: Record<string, number[]> = {}
+  VENDEDORES_OBJETIVO.forEach(vo => { actualPorMesMap[vo.label] = Array(12).fill(0) })
+
+  rawVentas.forEach(r => {
+    const f = parseFecha(r['FECHA'])
+    if (!f || f.year !== añoActual) return
+    const vend = r['NVENDEDOR']?.trim() ?? ''
+    if (!vend) return
+    const vo = VENDEDORES_OBJETIVO.find(v => matchVendor(vend, v.match))
+    if (!vo) return
+    actualPorMesMap[vo.label][f.mes] += parseNum(r['VRTOTAL'])
+  })
+
+  // ── Metas mensuales por vendedor desde LS_METAS_VENDEDOR ─────────────
+  const gaugesData = VENDEDORES_OBJETIVO.map(vo => {
+    const metaRow = metasVendedor.find(r => matchVendor(String(r['Vendedor'] ?? ''), vo.match))
+    let metaPorMes: number[]
+
+    if (metaRow) {
+      metaPorMes = MESES_COLS.map(m => parseNum(metaRow[m] ?? '0'))
+    } else {
+      // Fallback proporcional si no existe la hoja
+      const vendedoresMatch = vds.filter(v => matchVendor(v.Vendedor, vo.match))
+      const actualVend = vendedoresMatch.reduce((s, v) => s + v['Valor ($)'], 0)
+      const proporcion = totalActual > 0 ? actualVend / totalActual : 1 / VENDEDORES_OBJETIVO.length
+      const metaMensualVend = metaYTD > 0 ? (metaYTD / mesActualN) * proporcion : 0
+      metaPorMes = Array(12).fill(Math.round(metaMensualVend))
+    }
+
+    const metaAnual = metaPorMes.reduce((s, v) => s + v, 0)
+
+    return {
+      label:        vo.label,
+      color:        vo.color,
+      actualPorMes: actualPorMesMap[vo.label],
+      metaPorMes,
+      metaAnual,
+    }
   })
 
   const rankingData = vds.map((v, i) => ({ ...v, _rank: String(i + 1) }))
@@ -168,20 +207,14 @@ export default async function VendedoresPage({
       {/* ── Metas del mes ── */}
       <Card
         title="Avance vs Meta"
-        subtitle={`Meta: crecimiento +${(metaPct * 100).toFixed(0)}% vs ${añoAnterior} · YTD a ${new Date().toLocaleString('es-CO', { month: 'long' })}`}
+        subtitle={`Metas ${añoActual} · selecciona un mes o YTD`}
         className="mb-4"
       >
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
-          {gauges.map(g => (
-            <VendedorMetaCard
-              key={g.label}
-              nombre={g.label}
-              actual={g.actual}
-              meta={g.meta}
-              color={g.color}
-            />
-          ))}
-        </div>
+        <MetasGauges
+          gauges={gaugesData}
+          añoActual={añoActual}
+          mesActualN={mesActualN}
+        />
       </Card>
 
       <VendedoresInteractivo

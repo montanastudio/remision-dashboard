@@ -6,6 +6,8 @@ interface VendedorMetaCardProps {
   nombre: string
   actual: number
   meta: number
+  metaAnual?: number
+  metaLabel?: string  // etiqueta personalizada para la meta
   color?: string
 }
 
@@ -16,19 +18,21 @@ function getColor(pct: number): string {
   return '#ef4444'
 }
 
-export default function VendedorMetaCard({ nombre, actual, meta, color }: VendedorMetaCardProps) {
-  const pct = meta > 0 ? Math.min((actual / meta) * 100, 120) : 0
-  const arcColor = color ?? getColor(pct)
+export default function VendedorMetaCard({ nombre, actual, meta, metaAnual, metaLabel, color }: VendedorMetaCardProps) {
+  const rawPct   = meta > 0 ? (actual / meta) * 100 : 0
+  const pct      = Math.min(rawPct, 120)           // arco máximo al 120%
+  const arcColor = color ?? getColor(rawPct)
 
   // SVG semicircle gauge geometry
-  const cx = 60
-  const cy = 58
-  const r = 44
+  const cx = 60, cy = 58, r = 44
   const circumference = 2 * Math.PI * r
-  const halfCirc = Math.PI * r
-  const progress = Math.min(pct / 100, 1) * halfCirc
+  const halfCirc      = Math.PI * r
+  const progress      = Math.min(pct / 100, 1) * halfCirc
 
-  const displayPct = meta > 0 ? Math.round((actual / meta) * 100) : 0
+  // Texto del porcentaje — adaptado al largo
+  const displayPct = meta > 0 ? Math.round(rawPct) : 0
+  const pctStr     = displayPct > 999 ? '+999%' : `${displayPct}%`
+  const pctFontSize = pctStr.length <= 4 ? 18 : pctStr.length <= 5 ? 15 : 12
 
   return (
     <div
@@ -68,11 +72,11 @@ export default function VendedorMetaCard({ nombre, actual, meta, color }: Vended
             x={cx}
             y={cy - 6}
             textAnchor="middle"
-            fontSize={18}
+            fontSize={pctFontSize}
             fontWeight="700"
             fill={arcColor}
           >
-            {displayPct}%
+            {pctStr}
           </text>
           <text
             x={cx}
@@ -92,8 +96,13 @@ export default function VendedorMetaCard({ nombre, actual, meta, color }: Vended
           {nombre}
         </div>
         <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
-          Meta: {fmt(meta)}
+          {metaLabel ?? 'Meta'}: {fmt(meta)}
         </div>
+        {metaAnual != null && metaAnual > 0 && (
+          <div className="text-[10px] text-[var(--text-muted)]">
+            Anual: {fmt(metaAnual)}
+          </div>
+        )}
       </div>
 
       {/* Mini progress bar */}
