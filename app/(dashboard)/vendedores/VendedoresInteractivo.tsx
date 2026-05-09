@@ -153,7 +153,7 @@ export default function VendedoresInteractivo({ donutData, rankingData, detalleR
                   outerRadius={88}
                   dataKey="value"
                   paddingAngle={2}
-                  onClick={(d) => { const item = d as DonutItem; if (item?.fullName) toggle(item.fullName) }}
+                  onClick={(d) => { const item = d as unknown as DonutItem; if (item?.fullName) toggle(item.fullName) }}
                   cursor="pointer"
                 >
                   {donutData.map((entry) => (
