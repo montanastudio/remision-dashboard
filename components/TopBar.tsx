@@ -20,6 +20,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/zona': 'Zonas',
   '/configuracion/usuarios': 'Usuarios',
   '/configuracion/permisos': 'Permisos',
+  '/calculadora-precios': 'Calculadora de Precios',
+  '/gestion-cartera': 'Gestión Cartera',
 }
 
 const PAGE_SUBS: Record<string, string> = {
@@ -32,6 +34,8 @@ const PAGE_SUBS: Record<string, string> = {
   '/zona': 'Cobertura geográfica por zona',
   '/configuracion/usuarios': 'Gestión de acceso al sistema',
   '/configuracion/permisos': 'Control de acceso por rol',
+  '/calculadora-precios': 'Simulador de márgenes y precios',
+  '/gestion-cartera': 'Seguimiento y cobranza',
 }
 
 // Páginas donde el filtro de período es relevante (usan LS_VENTAS)
@@ -125,17 +129,20 @@ export default function TopBar({ onMenuToggle }: TopBarProps) {
           </Suspense>
         )}
 
-        {/* Estado En línea — clickeable */}
+        <DarkModeToggle />
+
+        {/* Avatar con aro verde — clickeable, abre popup de estado */}
         <div ref={popupRef} className="relative">
           <button
             onClick={togglePopup}
-            className="flex items-center gap-1.5 text-[12px] text-[#22c55e] hover:opacity-80 transition-opacity"
+            className="w-[32px] h-[32px] md:w-[34px] md:h-[34px] rounded-full flex items-center justify-center text-[12px] font-bold text-white flex-shrink-0 transition-opacity hover:opacity-90"
+            style={{
+              background:  'linear-gradient(135deg, #d42020, #1a3a8f)',
+              boxShadow:   '0 0 0 2px var(--sidebar), 0 0 0 4px #22c55e',
+            }}
+            aria-label="Estado del sistema"
           >
-            <span className="relative flex h-2 w-2 flex-shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22c55e] opacity-60" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#22c55e]" />
-            </span>
-            <span className="hidden sm:inline">En línea</span>
+            {user?.initials ?? 'GM'}
           </button>
 
           {/* Popup */}
@@ -162,16 +169,6 @@ export default function TopBar({ onMenuToggle }: TopBarProps) {
               </div>
             </div>
           )}
-        </div>
-
-        <DarkModeToggle />
-
-        {/* Avatar */}
-        <div
-          className="w-[32px] h-[32px] md:w-[34px] md:h-[34px] rounded-full flex items-center justify-center text-[12px] font-bold text-white flex-shrink-0"
-          style={{ background: 'linear-gradient(135deg, #d42020, #1a3a8f)' }}
-        >
-          {user?.initials ?? 'GM'}
         </div>
       </div>
     </div>

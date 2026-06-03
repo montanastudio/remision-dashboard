@@ -27,7 +27,13 @@ export async function getPermissions(): Promise<AllPerms> {
       if (!rol) continue
       perms[rol] = {} as RolePerms
       for (const s of SECTIONS) {
-        perms[rol][s] = row[s] !== 'NO'
+        if (row[s] !== undefined && row[s] !== '') {
+          // Column exists in sheet — use its value
+          perms[rol][s] = row[s] !== 'NO'
+        } else {
+          // Column missing from sheet — fall back to hardcoded default
+          perms[rol][s] = DEFAULT_PERMISSIONS[rol]?.[s] ?? false
+        }
       }
     }
     // Administrador always has full access

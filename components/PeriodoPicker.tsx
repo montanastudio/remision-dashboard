@@ -98,36 +98,19 @@ export default function PeriodoPicker() {
       {/* ── Botón principal ── */}
       <button
         onClick={() => setOpen(v => !v)}
-        className={`flex items-center gap-2 px-2 md:px-3 py-[6px] rounded-pill border text-[12px] font-medium transition-colors ${
-          isFiltered
-            ? 'border-[var(--brand-blue)] bg-[var(--brand-blue)]/10 text-[var(--brand-blue)]'
-            : 'border-[var(--border)] bg-[var(--card)] text-[var(--text-sub)] hover:bg-[var(--nav-hover)]'
-        }`}
+        className="relative w-9 h-9 rounded-[8px] flex items-center justify-center transition-colors bg-[#f1f5f9] dark:bg-[#1e2d47]"
+        title={currentLabel}
       >
-        {/* Ícono calendario */}
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke={isFiltered ? '#2563eb' : '#475569'} strokeWidth="2">
           <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
           <line x1="16" y1="2" x2="16" y2="6" />
           <line x1="8"  y1="2" x2="8"  y2="6" />
           <line x1="3"  y1="10" x2="21" y2="10" />
         </svg>
-        {/* Texto — oculto en móvil, visible en desktop */}
-        <span className="hidden md:inline max-w-[130px] truncate">{currentLabel}</span>
-        {/* Badge con × si hay filtro activo */}
+        {/* Punto azul si hay filtro activo */}
         {isFiltered && (
-          <span
-            onClick={e => { e.stopPropagation(); clear() }}
-            className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold bg-[var(--brand-blue)] text-white hover:opacity-80 transition-opacity"
-            title="Quitar filtro"
-          >
-            ×
-          </span>
-        )}
-        {!isFiltered && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            className={`hidden md:block flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}>
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
+          <span className="absolute top-[6px] right-[6px] w-[6px] h-[6px] rounded-full bg-[#2563eb]" />
         )}
       </button>
 

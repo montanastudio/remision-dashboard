@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import Card from '@/components/Card'
+import MiniDonut from './MiniDonut'
 import { exportToExcel } from '@/lib/exportExcel'
 
 const CLIENT_COLORS = [
@@ -10,21 +11,48 @@ const CLIENT_COLORS = [
   '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#64748b',
 ]
 
+const BUCKET_CONFIG = [
+  { name: 'No vencida',       label: 'No vencida', color: '#22c55e' },
+  { name: '1-30 días',        label: '1-30d',      color: '#86efac' },
+  { name: 'Próximo a vencer', label: '31-45d',     color: '#f59e0b' },
+  { name: 'Vencida',          label: '46-60d',     color: '#f97316' },
+  { name: 'Mora',             label: '61-75d',     color: '#ea580c' },
+  { name: 'Prejurídico',      label: '76-90d',     color: '#ef4444' },
+  { name: 'Jurídico',         label: '91+d',       color: '#b91c1c' },
+]
+
 const BUCKET_ORDER: Record<string, number> = {
-  '+90 días': 4, '61-90 días': 3, '31-60 días': 2, '1-30 días': 1, 'No vencida': 0,
+  'Jurídico': 6, 'Prejurídico': 5, 'Mora': 4, 'Vencida': 3, 'Próximo a vencer': 2, '1-30 días': 1, 'No vencida': 0,
+  '+90 días': 6, '61-90 días': 4, '31-60 días': 3,
 }
 const BUCKET_COLOR: Record<string, string> = {
-  '+90 días': '#ef4444', '61-90 días': '#ea580c', '31-60 días': '#f97316',
-  '1-30 días': '#f59e0b', 'No vencida': '#22c55e',
+  'Jurídico':         '#b91c1c',
+  'Prejurídico':      '#ef4444',
+  'Mora':             '#ea580c',
+  'Vencida':          '#f97316',
+  'Próximo a vencer': '#f59e0b',
+  '1-30 días':        '#86efac',
+  'No vencida':       '#22c55e',
+  '+90 días':         '#b91c1c',
+  '61-90 días':       '#ea580c',
+  '31-60 días':       '#f97316',
 }
-const BUCKET_ORDER_ARR = ['+90 días', '61-90 días', '31-60 días', '1-30 días', 'No vencida']
+const BUCKET_ORDER_ARR = [
+  'Jurídico', '+90 días', 'Prejurídico', 'Mora', '61-90 días',
+  'Vencida', '31-60 días', 'Próximo a vencer', '1-30 días', 'No vencida',
+]
 
 const BUCKET_BADGE: Record<string, { bg: string; text: string }> = {
-  '+90 días':   { bg: 'bg-red-100 dark:bg-red-950/60',       text: 'text-red-600 dark:text-red-400' },
-  '61-90 días': { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-600 dark:text-orange-400' },
-  '31-60 días': { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-500 dark:text-orange-400' },
-  '1-30 días':  { bg: 'bg-yellow-100 dark:bg-yellow-950/60', text: 'text-yellow-600 dark:text-yellow-500' },
-  'No vencida': { bg: 'bg-green-100 dark:bg-green-950/60',   text: 'text-green-600 dark:text-green-400' },
+  'Jurídico':         { bg: 'bg-red-100 dark:bg-red-950/60',       text: 'text-red-800 dark:text-red-300' },
+  'Prejurídico':      { bg: 'bg-red-100 dark:bg-red-950/60',       text: 'text-red-600 dark:text-red-400' },
+  'Mora':             { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-600 dark:text-orange-400' },
+  'Vencida':          { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-500 dark:text-orange-400' },
+  'Próximo a vencer': { bg: 'bg-yellow-100 dark:bg-yellow-950/60', text: 'text-yellow-600 dark:text-yellow-500' },
+  '1-30 días':        { bg: 'bg-green-100 dark:bg-green-950/60',   text: 'text-green-700 dark:text-green-400' },
+  'No vencida':       { bg: 'bg-green-100 dark:bg-green-950/60',   text: 'text-green-600 dark:text-green-400' },
+  '+90 días':         { bg: 'bg-red-100 dark:bg-red-950/60',       text: 'text-red-800 dark:text-red-300' },
+  '61-90 días':       { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-600 dark:text-orange-400' },
+  '31-60 días':       { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-500 dark:text-orange-400' },
 }
 
 function fmtM(n: number) {
@@ -41,40 +69,45 @@ function parseN(v: string | undefined) {
   return parseFloat(clean.replace(/[^0-9.-]/g, '')) || 0
 }
 
-interface BucketBar { label: string; value: string; raw: number; pct: number; color: string }
 interface Props {
-  donutData:    { name: string; value: number; color: string }[]
-  cartera:      Record<string, string>[]
-  totalCartera: number
-  bucketBars:   BucketBar[]
+  cartera:    Record<string, string>[]
+  vendedores: string[]
 }
 
-interface TooltipEntry { name: string; value: number; color: string }
+const BUCKET_LABEL: Record<string, string> = {
+  'No vencida': 'No vencida', '1-30 días': '1-30d',
+  'Próximo a vencer': '31-45d', 'Vencida': '46-60d',
+  'Mora': '61-75d', 'Prejurídico': '76-90d', 'Jurídico': '91+d',
+  '+90 días': '91+d', '61-90 días': '61-90d', '31-60 días': '31-60d',
+}
+
+interface TooltipEntry { name: string; label?: string; value: number; color: string }
 const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { name: string; value: number; color: string; payload: TooltipEntry }[] }) => {
   if (!active || !payload?.length) return null
   const p = payload[0]
+  const display = p.payload?.label ?? BUCKET_LABEL[p.name] ?? p.name
   return (
     <div className="rounded-[8px] border px-3 py-2 text-[11px] shadow-lg"
       style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}>
-      <div className="font-semibold mb-0.5">{p.name}</div>
+      <div className="font-semibold mb-0.5">{display}</div>
       <div>{fmtM(p.value)}</div>
     </div>
   )
 }
 
-export default function CarteraInteractivo({ donutData, cartera, totalCartera, bucketBars }: Props) {
-  const [selectedBucket,     setSelectedBucket]     = useState<string | null>(null)
-  const [selectedClientNIT,  setSelectedClientNIT]  = useState<string | null>(null)
-  const [selectedDetalleName,setSelectedDetalleName] = useState<string | null>(null)
-  const [showAllClients,     setShowAllClients]     = useState(false)
-  const [clientSearch,       setClientSearch]       = useState('')
+export default function CarteraInteractivo({ cartera, vendedores }: Props) {
+  const [selectedVendedor,    setSelectedVendedor]    = useState('')
+  const [selectedBucket,      setSelectedBucket]      = useState<string | null>(null)
+  const [selectedClientNIT,   setSelectedClientNIT]   = useState<string | null>(null)
+  const [selectedDetalleName, setSelectedDetalleName] = useState<string | null>(null)
+  const [showAllClients,      setShowAllClients]      = useState(false)
+  const [clientSearch,        setClientSearch]        = useState('')
 
   const detalleRef = useRef<HTMLDivElement>(null)
 
   const toggleBucket = (name: string) =>
     setSelectedBucket((p) => (p === name ? null : name))
 
-  // Seleccionar cliente: expande detalle y hace scroll hacia él
   const selectClient = (nit: string) => {
     setSelectedClientNIT((p) => {
       const next = p === nit ? null : nit
@@ -83,14 +116,58 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
     })
   }
 
-  // Reset selecciones cuando cambia el bucket
   useEffect(() => { setSelectedClientNIT(null); setSelectedDetalleName(null); setClientSearch('') }, [selectedBucket])
-  // Reset nombre al cambiar NIT
   useEffect(() => { setSelectedDetalleName(null) }, [selectedClientNIT])
+  // Reset all drill-downs when vendor changes
+  useEffect(() => {
+    setSelectedBucket(null)
+    setSelectedClientNIT(null)
+    setSelectedDetalleName(null)
+    setClientSearch('')
+  }, [selectedVendedor])
+
+  // ── Cartera filtrada por vendedor ──────────────────────────────────
+  const activeCartera = useMemo(() =>
+    selectedVendedor
+      ? cartera.filter(r => (r['Vendedor'] ?? '').trim() === selectedVendedor)
+      : cartera,
+    [cartera, selectedVendedor]
+  )
+
+  // ── Métricas del encabezado (reaccionan al filtro de vendedor) ─────
+  const { totalCartera, bucketBars, donutData, clientesEnMora, facturasEnMora } = useMemo(() => {
+    const enMora = (r: Record<string, string>) => r['En Mora']?.toLowerCase().startsWith('s')
+    const cEnMora = new Set(activeCartera.filter(enMora).map(r => r['NIT'])).size
+    const fEnMora = activeCartera.filter(enMora).length
+
+    const bucketAgg: Record<string, number> = {}
+    activeCartera.forEach(r => {
+      const name = r['Bucket']
+      if (!name) return
+      bucketAgg[name] = (bucketAgg[name] ?? 0) + parseN(r['Total Adeudado ($)'])
+    })
+    const total = Object.values(bucketAgg).reduce((s, v) => s + v, 0)
+    const maxB  = Math.max(...Object.values(bucketAgg), 1)
+
+    const bars = BUCKET_CONFIG
+      .filter(b => bucketAgg[b.name])
+      .map(b => ({
+        name:  b.name,
+        label: b.label,
+        value: fmt(bucketAgg[b.name]),
+        raw:   bucketAgg[b.name],
+        pct:   (bucketAgg[b.name] / maxB) * 100,
+        color: b.color,
+      }))
+
+    const donut = bars.map(b => ({ name: b.name, label: b.label, value: b.raw, color: b.color }))
+
+    return { totalCartera: total, bucketBars: bars, donutData: donut, clientesEnMora: cEnMora, facturasEnMora: fEnMora }
+  }, [activeCartera])
 
   // ── Clientes donut + tabla ─────────────────────────────────────────
   const { clientesDonut, clientesList, totalClientes } = useMemo(() => {
-    const source = selectedBucket ? cartera.filter((r) => r['Bucket'] === selectedBucket) : cartera
+    const source = selectedBucket ? activeCartera.filter((r) => r['Bucket'] === selectedBucket) : activeCartera
 
     const map: Record<string, { nit: string; nombre: string; value: number }> = {}
     source.forEach((r) => {
@@ -123,7 +200,7 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
     }))
 
     return { clientesDonut: donut, clientesList: list, totalClientes: total }
-  }, [cartera, selectedBucket])
+  }, [activeCartera, selectedBucket])
 
   const LIST_MAX = 8
   const searchTerm = clientSearch.trim().toLowerCase()
@@ -136,9 +213,9 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
   const visibleClients = (showAllClients || searchTerm) ? searchedClients : searchedClients.slice(0, LIST_MAX)
   const hiddenCount = searchTerm ? 0 : searchedClients.length - LIST_MAX
 
-  // ── Detalle por NIT (resumen para tabla colapsada) ─────────────────
+  // ── Detalle por NIT ────────────────────────────────────────────────
   const detalleNIT = useMemo(() => {
-    const source = selectedBucket ? cartera.filter((r) => r['Bucket'] === selectedBucket) : cartera
+    const source = selectedBucket ? activeCartera.filter((r) => r['Bucket'] === selectedBucket) : activeCartera
     const map: Record<string, { nit: string; nombres: Set<string>; total: number; facturas: number; maxDias: number }> = {}
     source.forEach((r) => {
       const nit    = r['NIT'] || 'Sin NIT'
@@ -155,12 +232,12 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
       .map((d) => ({ ...d, nombres: Array.from(d.nombres) }))
       .filter((d) => d.total > 0)
       .sort((a, b) => b.total - a.total)
-  }, [cartera, selectedBucket])
+  }, [activeCartera, selectedBucket])
 
-  // ── Mini distribución de cartera del cliente seleccionado ───────────
+  // ── Mini distribución del cliente seleccionado ─────────────────────
   const clienteDistribucion = useMemo(() => {
     if (!selectedClientNIT) return []
-    const source = cartera.filter((r) => (r['NIT'] || '') === selectedClientNIT &&
+    const source = activeCartera.filter((r) => (r['NIT'] || '') === selectedClientNIT &&
       (selectedBucket ? r['Bucket'] === selectedBucket : true))
     const map: Record<string, number> = {}
     source.forEach((r) => {
@@ -169,14 +246,13 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
     })
     return BUCKET_ORDER_ARR
       .filter((b) => map[b])
-      .map((b) => ({ name: b, value: map[b], color: BUCKET_COLOR[b] ?? '#94a3b8' }))
-  }, [cartera, selectedClientNIT, selectedBucket])
+      .map((b) => ({ name: b, label: BUCKET_LABEL[b] ?? b, value: map[b], color: BUCKET_COLOR[b] ?? '#94a3b8' }))
+  }, [activeCartera, selectedClientNIT, selectedBucket])
 
-  // ── Detalle agrupado por nombre (para el NIT seleccionado) ──────────
-
+  // ── Detalle agrupado por nombre ────────────────────────────────────
   const detalleClienteGrupos = useMemo(() => {
     if (!selectedClientNIT) return []
-    const source = cartera.filter((r) =>
+    const source = activeCartera.filter((r) =>
       (r['NIT'] || '') === selectedClientNIT &&
       (selectedBucket ? r['Bucket'] === selectedBucket : true)
     )
@@ -195,23 +271,22 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
     return Object.values(map)
       .filter((g) => g.total > 0)
       .sort((a, b) => b.total - a.total)
-  }, [cartera, selectedClientNIT, selectedBucket])
+  }, [activeCartera, selectedClientNIT, selectedBucket])
 
-  // Nombre "principal" del NIT (mayor total)
   const selectedClientName = detalleClienteGrupos[0]?.nombre ?? selectedClientNIT ?? ''
 
-  // ── Facturas Vencidas: responde a nombre seleccionado > NIT > bucket ─
+  // ── Facturas Vencidas ──────────────────────────────────────────────
   const filteredVencidas = useMemo(() => {
-    return cartera
+    return activeCartera
       .filter((r) => {
         if (selectedDetalleName) return r['Cliente']?.trim() === selectedDetalleName
         if (selectedClientNIT)   return (r['NIT'] || '') === selectedClientNIT && (selectedBucket ? r['Bucket'] === selectedBucket : true)
         return r['En Mora'] === 'SI' && (selectedBucket ? r['Bucket'] === selectedBucket : true)
       })
       .sort((a, b) => parseN(b['Días Vencido']) - parseN(a['Días Vencido']))
-  }, [cartera, selectedDetalleName, selectedClientNIT, selectedBucket])
+  }, [activeCartera, selectedDetalleName, selectedClientNIT, selectedBucket])
 
-  // ── Exportar Detalle de Cliente ────────────────────────────────────
+  // ── Exportar ───────────────────────────────────────────────────────
   const exportDetalle = useCallback(() => {
     if (!selectedClientNIT || detalleClienteGrupos.length === 0) return
     const rows = detalleClienteGrupos.map((g) => ({
@@ -225,7 +300,6 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
     exportToExcel(rows, `Detalle_${nombre}`, 'Detalle')
   }, [detalleClienteGrupos, selectedClientNIT, selectedClientName])
 
-  // ── Exportar Facturas Vencidas ─────────────────────────────────────
   const exportVencidas = useCallback(() => {
     if (filteredVencidas.length === 0) return
     const rows = filteredVencidas.map((r) => ({
@@ -248,6 +322,68 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
   // ── RENDER ─────────────────────────────────────────────────────────
   return (
     <>
+      {/* Filtro de vendedor */}
+      {vendedores.length > 0 && (
+        <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card px-4 py-2.5 mb-4 flex items-center gap-3">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            className="flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
+          </svg>
+          <span className="text-[11px] font-medium text-[var(--text-muted)] flex-shrink-0">Vendedor</span>
+          <select
+            value={selectedVendedor}
+            onChange={e => setSelectedVendedor(e.target.value)}
+            className="text-[12px] px-2.5 py-[6px] rounded-[7px] border bg-[var(--card)] text-[var(--text)] focus:outline-none focus:ring-1 transition-all cursor-pointer flex-1 max-w-[260px]"
+            style={{ borderColor: 'var(--border)', ['--tw-ring-color' as string]: 'var(--brand-blue)' }}
+          >
+            <option value="">Todos los vendedores</option>
+            {vendedores.map(v => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+          {selectedVendedor && (
+            <>
+              <span className="text-[11px] text-[var(--text-muted)]">
+                <span className="font-semibold text-[var(--text-sub)]">{activeCartera.length}</span> registros
+              </span>
+              <button
+                onClick={() => setSelectedVendedor('')}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-[6px] text-[11px] font-medium border border-[var(--border)] bg-[var(--bar-bg)] text-[var(--text-sub)] hover:text-[var(--text)] transition-colors ml-auto"
+              >
+                ✕ Limpiar
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Tarjeta encabezado: total + mini donut */}
+      <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card p-[16px_18px] mb-4 flex items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] font-medium text-[var(--text-sub)] mb-1">
+            Total Cartera{selectedVendedor && <span className="ml-1.5 text-[var(--brand-blue)]">· {selectedVendedor}</span>}
+          </div>
+          <div className="text-[28px] md:text-[32px] font-bold tracking-[-0.5px] text-[var(--text)] leading-tight break-words">
+            {fmt(totalCartera)}
+          </div>
+          <div className="mt-1.5 flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
+            <span><span className="font-semibold text-[var(--text-sub)]">{clientesEnMora.toLocaleString('es-CO')}</span> clientes en mora</span>
+            <span className="text-[var(--border)]">·</span>
+            <span><span className="font-semibold text-[var(--text-sub)]">{facturasEnMora.toLocaleString('es-CO')}</span> facturas vencidas</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+            {donutData.map(b => (
+              <span key={b.name} className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
+                <span title={b.name}>{b.label}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+        <MiniDonut data={donutData} />
+      </div>
+
       {/* Fila donuts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
 
@@ -274,15 +410,21 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
             </div>
             <div className="flex-1 w-full space-y-1.5">
               {bucketBars.map((b, i) => (
-                <button key={i} onClick={() => toggleBucket(b.label)}
-                  className={`w-full flex items-center gap-2 rounded-[6px] px-2 py-[5px] transition-all text-left ${
-                    selectedBucket === b.label ? 'bg-[var(--bar-bg)] ring-1 ring-[var(--border)]' : 'hover:bg-[var(--bar-bg)]'
+                <button key={i} onClick={() => toggleBucket(b.name)} title={b.name}
+                  className={`w-full flex items-center gap-2 rounded-[6px] px-2 py-[5px] transition-all text-left group ${
+                    selectedBucket === b.name ? 'bg-[var(--bar-bg)] ring-1 ring-[var(--border)]' : 'hover:bg-[var(--bar-bg)]'
                   }`}>
                   <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: b.color }} />
-                  <span className={`text-[12px] w-[80px] flex-shrink-0 ${selectedBucket === b.label ? 'text-[var(--text)] font-semibold' : 'text-[var(--text-sub)]'}`}>{b.label}</span>
+                  <span className={`text-[12px] w-[52px] flex-shrink-0 font-semibold num ${selectedBucket === b.name ? 'text-[var(--text)]' : 'text-[var(--text-sub)]'}`}>
+                    {b.label}
+                  </span>
+                  <span className="text-[11px] text-[var(--text-muted)] flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hidden md:block"
+                    style={{ maxWidth: 110, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                    {b.name}
+                  </span>
                   <div className="flex-1 h-[4px] bg-[var(--bar-bg)] rounded-full overflow-hidden">
                     <div className="h-full rounded-full transition-opacity"
-                      style={{ width: `${b.pct}%`, background: b.color, opacity: selectedBucket && selectedBucket !== b.label ? 0.25 : 1 }} />
+                      style={{ width: `${b.pct}%`, background: b.color, opacity: selectedBucket && selectedBucket !== b.name ? 0.25 : 1 }} />
                   </div>
                   <span className="text-[11px] num text-[var(--text)] w-[86px] text-right flex-shrink-0">{b.value}</span>
                   <span className="text-[10px] num text-[var(--text-muted)] w-[28px] text-right flex-shrink-0">
@@ -331,7 +473,7 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
                   onChange={e => setClientSearch(e.target.value)}
                   placeholder="Buscar cliente o NIT…"
                   className="w-full pl-8 pr-7 py-[6px] text-[12px] rounded-[6px] border bg-[var(--bar-bg)] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 transition-all"
-                  style={{ borderColor: 'var(--border)', '--tw-ring-color': 'var(--brand-blue)' } as React.CSSProperties}
+                  style={{ borderColor: 'var(--border)', ['--tw-ring-color' as string]: 'var(--brand-blue)' }}
                 />
                 {clientSearch && (
                   <button
@@ -401,9 +543,7 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
 
       {/* ── Detalle de Cliente (expandible) ── */}
       <div ref={detalleRef} className="mb-4">
-        <div
-          className={`rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card overflow-hidden transition-all`}
-        >
+        <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card overflow-hidden transition-all">
           {/* Cabecera siempre visible */}
           <div
             className="flex items-center justify-between px-[18px] py-[14px] cursor-pointer select-none hover:bg-[var(--bar-bg)] transition-colors"
@@ -445,7 +585,6 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
               {/* Mini distribución de cartera del cliente */}
               {clienteDistribucion.length > 0 && (
                 <div className="flex flex-col sm:flex-row items-center gap-4 mb-4 p-3 rounded-[8px] bg-[var(--bar-bg)]">
-                  {/* Donut */}
                   <div className="w-[100px] h-[100px] flex-shrink-0">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
@@ -459,14 +598,13 @@ export default function CarteraInteractivo({ donutData, cartera, totalCartera, b
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
-                  {/* Leyenda con valores */}
                   <div className="flex-1 w-full space-y-1.5">
                     {clienteDistribucion.map((b, i) => {
                       const total = clienteDistribucion.reduce((s, x) => s + x.value, 0)
                       return (
                         <div key={i} className="flex items-center gap-2">
                           <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
-                          <span className="text-[11px] text-[var(--text-sub)] w-[80px] flex-shrink-0">{b.name}</span>
+                          <span className="text-[11px] text-[var(--text-sub)] w-[52px] flex-shrink-0" title={b.name}>{b.label ?? b.name}</span>
                           <div className="flex-1 h-[3px] bg-[var(--bg)] rounded-full overflow-hidden">
                             <div className="h-full rounded-full"
                               style={{ width: `${(b.value / total) * 100}%`, background: b.color }} />

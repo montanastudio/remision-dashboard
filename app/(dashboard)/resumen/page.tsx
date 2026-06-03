@@ -1,4 +1,4 @@
-import { getSheetData, rowsToObjects, parseNum, parseFecha } from '@/lib/sheets'
+import { getSheetData, rowsToObjects, normalizeVentasColumns, parseNum, parseFecha } from '@/lib/sheets'
 import { filtrarVentas, filtroLabel } from '@/lib/filtro-ventas'
 import { fmt, fmtN } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
@@ -24,12 +24,14 @@ export default async function ResumenPage({
   let carteraRes: Row[] = []
   let sinRotar: Row[] = []
   let metasRows: Row[] = []
+  let ventasMensual: Row[] = []
 
   // ── Fetch principal: cada hoja por separado para que un fallo no afecte las demás ──
-  try { ventas     = rowsToObjects(await getSheetData('LS_VENTAS'))          } catch { /* no configurado */ }
-  try { carteraRes = rowsToObjects(await getSheetData('LS_Cartera_Vendedor_Resumen')) } catch { /* hoja no existe */ }
-  try { sinRotar   = rowsToObjects(await getSheetData('LS_Sin_Rotar'))       } catch { /* hoja no existe */ }
-  try { metasRows  = rowsToObjects(await getSheetData('LS METAS Y PROYECCION')) } catch { /* hoja no existe */ }
+  try { ventas        = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel'))) } catch { /* no configurado */ }
+  try { carteraRes    = rowsToObjects(await getSheetData('RAW_Cartera'))          } catch { /* hoja no existe */ }
+  try { sinRotar      = rowsToObjects(await getSheetData('RAW_Sin_Rotar'))       } catch { /* hoja no existe */ }
+  try { metasRows     = rowsToObjects(await getSheetData('LS METAS Y PROYECCION')) } catch { /* hoja no existe */ }
+  try { ventasMensual = rowsToObjects(await getSheetData('RES_Ventas_Mensual')) } catch { /* hoja no existe */ }
 
   // ── Mínimo de gastos fijos desde LS_MINIMOS ─────────────────────────
   let minimoMensual: number | undefined = undefined
@@ -89,6 +91,24 @@ export default async function ResumenPage({
     } else if (añoVal === añoAnterior) {
       trendMap[mes].anterior    += valor
       trendMap[mes].anteriorUnd += cantidad
+    }
+  })
+
+  // ── Poblar anterior desde RES_Ventas_Mensual (datos 2025 no presentes en RAW_Ventas_Excel) ──
+  const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
+  ventasMensual.forEach(r => {
+    const mesLabel = (r['Mes'] ?? r['MES'] ?? '').toLowerCase().trim()
+    // El año puede venir en su propia columna o embebido en el label del mes ("enero 2025")
+    const añoEnMes = mesLabel.match(/\b(20\d{2})\b/)?.[1]
+    const año = parseInt(r['Año'] ?? r['AÑO'] ?? añoEnMes ?? '0', 10)
+    if (año !== añoAnterior) return
+    const mesIdx = MESES_ES.findIndex(m => mesLabel.includes(m))
+    if (mesIdx < 0 || mesIdx > 11) return
+    const mes = MESES[mesIdx]
+    // Solo sumar si el loop de ventas.forEach no llenó ya esos valores (para evitar doble conteo)
+    if (trendMap[mes].anterior === 0) {
+      trendMap[mes].anterior    += parseNum(r['Valor Bruto ($)'] ?? r['VALOR'] ?? r['Vr. Total ($)'] ?? r['Total'] ?? '')
+      trendMap[mes].anteriorUnd += parseNum(r['Cantidad'] ?? r['CANTIDAD'] ?? '')
     }
   })
 
@@ -220,19 +240,47 @@ export default async function ResumenPage({
   const margenPct      = totalVentas > 0 ? (utilidadBruta / totalVentas) * 100 : 0
 
   // ── Cartera ──────────────────────────────────────────────────────────
-  const totalCartera   = carteraRes.reduce((s, r) => s + parseNum(r['Total Adeudado ($)']), 0)
-  const cartera90      = carteraRes.find(r => r['Bucket'] === '+90 días')
-  const cartera90Total = parseNum(cartera90?.['Total Adeudado ($)'] ?? '0')
-
-  const bucketColors: Record<string, string> = {
-    'No vencida': '#22c55e', '1-30 días': '#f59e0b',
-    '31-60 días': '#f97316', '61-90 días': '#ea580c', '+90 días': '#ef4444',
+  // Normalizar bucket names (legacy → canónico) y agregar desde RAW_Cartera
+  const CARTERA_LEGACY: Record<string, string> = {
+    'No Vencida': 'No vencida',       'No vencida': 'No vencida',
+    '1-30 días':  '1-30 días',        '1-30d': '1-30 días',
+    '31-45 días': 'Próximo a vencer', 'Próxima a Vencer': 'Próximo a vencer', 'Próximo a vencer': 'Próximo a vencer', '31-60 días': 'Próximo a vencer',
+    '46-60 días': 'Vencida',          'Vencida': 'Vencida',
+    '61-75 días': 'Mora',             'Mora': 'Mora', '61-90 días': 'Mora',
+    '76-90 días': 'Prejurídico',      'Prejudicial': 'Prejurídico', 'Prejurídico': 'Prejurídico',
+    '91+ días':   'Jurídico',         '+90 días': 'Jurídico', 'Jurídica': 'Jurídico', 'Jurídico': 'Jurídico',
   }
-  const donutData = carteraRes.map(b => ({
-    name:  b['Bucket'],
-    value: parseNum(b['Total Adeudado ($)']),
-    color: bucketColors[b['Bucket']] ?? '#94a3b8',
-  }))
+  const CARTERA_COLORS: Record<string, string> = {
+    'No vencida': '#22c55e', '1-30 días': '#86efac',
+    'Próximo a vencer': '#f59e0b', 'Vencida': '#f97316',
+    'Mora': '#ea580c', 'Prejurídico': '#ef4444', 'Jurídico': '#b91c1c',
+  }
+  const CARTERA_LABELS: Record<string, string> = {
+    'No vencida': 'No vencida', '1-30 días': '1-30d',
+    'Próximo a vencer': '31-45d', 'Vencida': '46-60d',
+    'Mora': '61-75d', 'Prejurídico': '76-90d', 'Jurídico': '91+d',
+  }
+  const BUCKET_ORDER_RES = ['No vencida','1-30 días','Próximo a vencer','Vencida','Mora','Prejurídico','Jurídico']
+
+  const bucketAggRes: Record<string, number> = {}
+  carteraRes.forEach(r => {
+    const name = CARTERA_LEGACY[r['Bucket'] ?? ''] ?? r['Bucket'] ?? ''
+    if (!name) return
+    bucketAggRes[name] = (bucketAggRes[name] ?? 0) + parseNum(r['Total Adeudado ($)'])
+  })
+
+  const totalCartera   = Object.values(bucketAggRes).reduce((s, v) => s + v, 0)
+  const cartera90Total = bucketAggRes['Jurídico'] ?? 0
+  const facturasJuridico = carteraRes.filter(r => (CARTERA_LEGACY[r['Bucket'] ?? ''] ?? r['Bucket']) === 'Jurídico').length
+
+  const donutData = BUCKET_ORDER_RES
+    .filter(name => bucketAggRes[name] > 0)
+    .map(name => ({
+      name,
+      label: CARTERA_LABELS[name] ?? name,
+      value: bucketAggRes[name],
+      color: CARTERA_COLORS[name],
+    }))
 
   // ── Inventario sin rotar ─────────────────────────────────────────────
   const criticosSinRotar = sinRotar.filter(r => r['Estado'] === 'CRITICO')
@@ -326,7 +374,7 @@ export default async function ResumenPage({
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
         <Card title="Alertas Gerenciales" subtitle="indicadores prioritarios">
-          <AlertItem type="critical" title="Cartera crítica +90 días" description={`${fmt(cartera90Total)} en mora grave. ${cartera90?.['Facturas'] ?? '—'} facturas en este estado.`} />
+          <AlertItem type="critical" title="Cartera crítica +90 días" description={`${fmt(cartera90Total)} en mora grave. ${facturasJuridico > 0 ? facturasJuridico : '—'} facturas en este estado.`} />
           <AlertItem type="warn" title="Inventario sin rotación" description={`${fmt(valCritico)} en ${criticosSinRotar.length} SKUs sin movimiento mayor a 90 días.`} />
           <AlertItem type="ok" title="Ventas del período" description={`${fmt(totalVentas)} acumulados con ${fmtN(totalUnd)} unidades despachadas.`} />
         </Card>

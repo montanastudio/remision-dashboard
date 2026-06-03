@@ -108,12 +108,46 @@ const sections: NavSection[] = [
         ),
       },
       {
+        href: '/gestion-cartera',
+        section: 'gestion_cartera',
+        label: 'Gestión Cartera',
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <path d="M8 21h8M12 17v4" />
+            <path d="M7 10h2l2 4 2-8 2 4h2" />
+          </svg>
+        ),
+      },
+      {
         href: '/inventario',
         section: 'inventario',
         label: 'Inventario',
         icon: (
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    label: 'Herramientas',
+    items: [
+      {
+        href: '/calculadora-precios',
+        section: 'calculadora_precios',
+        label: 'Calculadora Precios',
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="4" y="2" width="16" height="20" rx="2" />
+            <line x1="8" y1="6" x2="16" y2="6" />
+            <line x1="8" y1="10" x2="10" y2="10" />
+            <line x1="14" y1="10" x2="16" y2="10" />
+            <line x1="8" y1="14" x2="10" y2="14" />
+            <line x1="14" y1="14" x2="16" y2="14" />
+            <line x1="8" y1="18" x2="10" y2="18" />
+            <line x1="14" y1="18" x2="16" y2="18" />
           </svg>
         ),
       },
@@ -224,12 +258,12 @@ export default function SidebarNav({ isMobileOpen = false, onClose, allowedSecti
   return (
     <div
       className={[
-        'flex flex-col flex-shrink-0 overflow-y-auto bg-[var(--sidebar)] border-r border-[var(--border)] transition-all duration-300',
+        'flex flex-col flex-shrink-0 bg-[var(--sidebar)] border-r border-[var(--border)] transition-all duration-300',
         'fixed inset-y-0 left-0 z-40',
         'md:relative md:z-auto md:translate-x-0',
         isMobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
       ].join(' ')}
-      style={{ width: 220, minHeight: '100vh' }}
+      style={{ width: 220, height: '100%' }}
     >
       {/* Logo */}
       <div
@@ -249,7 +283,7 @@ export default function SidebarNav({ isMobileOpen = false, onClose, allowedSecti
       </div>
 
       {/* Nav — usa Suspense porque NavLinks lee useSearchParams */}
-      <nav className="flex-1 p-3">
+      <nav className="flex-1 p-3 overflow-y-auto">
         <Suspense fallback={
           <div className="space-y-0.5">
             {sections.map(s => s.items).flat()

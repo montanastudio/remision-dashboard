@@ -13,7 +13,7 @@ export default function LayoutShell({ children, allowedSections }: LayoutShellPr
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="flex min-h-screen bg-[var(--bg)]">
+    <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
       {/* Backdrop solo en móvil */}
       {sidebarOpen && (
         <div
@@ -28,7 +28,7 @@ export default function LayoutShell({ children, allowedSections }: LayoutShellPr
         allowedSections={allowedSections}
       />
 
-      <div className="flex flex-col flex-1 min-w-0">
+      <div className="flex flex-col flex-1 min-w-0 overflow-y-auto">
         <TopBar onMenuToggle={() => setSidebarOpen((v) => !v)} />
         <main className="flex-1 p-4 md:p-[16px_24px_24px] fade-in-up">
           {children}

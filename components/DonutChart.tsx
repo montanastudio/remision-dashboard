@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recha
 
 interface DonutItem {
   name: string
+  label?: string
   value: number
   color: string
 }
@@ -44,7 +45,11 @@ export default function DonutChart({ data }: DonutChartProps) {
             ))}
           </Pie>
           <Tooltip
-            formatter={(value) => fmt(Number(value))}
+            formatter={(value, name) => {
+              const item = data.find(d => d.name === name)
+              const display = item?.label ?? name
+              return [fmt(Number(value)), display]
+            }}
             contentStyle={{
               background: 'var(--card)',
               border: '1px solid var(--border)',
@@ -59,9 +64,11 @@ export default function DonutChart({ data }: DonutChartProps) {
             verticalAlign="middle"
             iconSize={8}
             iconType="square"
-            formatter={(value) => (
-              <span style={{ fontSize: 11, color: 'var(--text-sub)' }}>{value}</span>
-            )}
+            formatter={(value) => {
+              const item = data.find(d => d.name === value)
+              const display = item?.label ?? value
+              return <span style={{ fontSize: 11, color: 'var(--text-sub)' }}>{display}</span>
+            }}
           />
         </PieChart>
       </ResponsiveContainer>
