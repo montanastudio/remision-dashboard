@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getSheetData, setSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
+import { getSheetData, setSheetData, rowsToObjects, normalizeVentasColumns, parseNum } from '@/lib/sheets'
 import { parseFecha } from '@/lib/sheets'
 
 const MESES_LABELS = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -30,9 +30,9 @@ export async function POST() {
   // ── Leer ventas históricas ───────────────────────────────────────────
   let rawVentas: Record<string, string>[] = []
   try {
-    rawVentas = rowsToObjects(await getSheetData('LS_VENTAS'))
+    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
   } catch {
-    return Response.json({ error: 'No se pudo leer LS_VENTAS' }, { status: 500 })
+    return Response.json({ error: 'No se pudo leer RAW_Ventas_Excel' }, { status: 500 })
   }
 
   // Detectar el año más reciente con datos completos (año anterior al máximo)

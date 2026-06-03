@@ -1,4 +1,4 @@
-import { getSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
+import { getSheetData, rowsToObjects, normalizeVentasColumns, parseNum } from '@/lib/sheets'
 import { filtrarVentas, filtroLabel } from '@/lib/filtro-ventas'
 import { fmt, fmtN } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
@@ -22,8 +22,7 @@ export default async function VentasPage({
   let rawVentas: Row[] = []
 
   try {
-    const raw = await getSheetData('LS_VENTAS')
-    rawVentas = rowsToObjects(raw)
+    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
   } catch {
     // empty
   }

@@ -1,4 +1,4 @@
-import { getSheetData, rowsToObjects, parseNum, parseFecha } from '@/lib/sheets'
+import { getSheetData, rowsToObjects, normalizeVentasColumns, parseNum, parseFecha } from '@/lib/sheets'
 import { filtrarVentas } from '@/lib/filtro-ventas'
 import { fmt } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
@@ -34,13 +34,16 @@ export default async function VendedoresPage({
   type Row = Record<string, string>
   let rawVentas: Row[] = []
   let metasRows: Row[] = []
+  let ventasMensual: Row[] = []
 
   const mesActualN = new Date().getMonth() + 1 // 1-12
 
   try {
-    const raw = await getSheetData('LS_VENTAS')
-    rawVentas = rowsToObjects(raw)
+    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
   } catch { /* empty */ }
+  try {
+    ventasMensual = rowsToObjects(await getSheetData('RES_Ventas_Mensual'))
+  } catch { /* hoja no existe */ }
 
   const ventas = filtrarVentas(rawVentas, filtroParams)
 
@@ -96,13 +99,22 @@ export default async function VendedoresPage({
     })
   })
 
-  // Total año anterior usando TODOS los datos (base para calcular la meta)
+  // Total año anterior: primero intenta desde rawVentas, si no, usa RES_Ventas_Mensual
   rawVentas.forEach(r => {
     const fecha = parseFecha(r['FECHA'])
     if (fecha && fecha.year === añoAnterior) {
       totalAnterior += parseNum(r['VRTOTAL'])
     }
   })
+  if (totalAnterior === 0 && ventasMensual.length > 0) {
+    ventasMensual.forEach(r => {
+      const mesLabel = (r['Mes'] ?? r['MES'] ?? '').toLowerCase().trim()
+      const añoEnMes = mesLabel.match(/\b(20\d{2})\b/)?.[1]
+      const año = parseInt(r['Año'] ?? r['AÑO'] ?? añoEnMes ?? '0', 10)
+      if (año !== añoAnterior) return
+      totalAnterior += parseNum(r['Valor Bruto ($)'] ?? r['VALOR'] ?? r['Vr. Total ($)'] ?? r['Total'] ?? '')
+    })
+  }
 
   // Construir array de vendedores para la tabla de ranking
   const totalActual = Object.values(vendMap).reduce((s, v) => s + v.valor, 0)

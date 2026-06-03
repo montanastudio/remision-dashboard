@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { getSheetData, setSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
+import { getSheetData, setSheetData, rowsToObjects, normalizeVentasColumns, parseNum } from '@/lib/sheets'
 
 const VENDEDORES_OBJETIVO = [
   { label: 'Ventas Directas',       match: ['directa', 'directo', 'ventas directas'] },
@@ -27,10 +27,10 @@ export async function POST() {
   const añoAnterior = new Date().getFullYear() - 1
 
   const [vh, mt] = await Promise.all([
-    getSheetData('LS_Ventas'),
+    getSheetData('RAW_Ventas_Excel'),
     getSheetData('LS METAS Y PROYECCION'),
   ])
-  const ventasHistorico = rowsToObjects(vh)
+  const ventasHistorico = normalizeVentasColumns(rowsToObjects(vh))
   const metasRows = rowsToObjects(mt)
 
   // Parse meta de crecimiento

@@ -4,12 +4,13 @@ import { authOptions } from '@/lib/auth'
 import { getSheetData, rowsToObjects, SheetName } from '@/lib/sheets'
 
 const VALID_SHEETS: SheetName[] = [
-  'LS_VENTAS',
-  'LS_Ventas',
-  'LS_Cartera_Vendedor',
-  'LS_Cartera_Vendedor_Resumen',
-  'LS_Inventario',
-  'LS_Sin_Rotar',
+  'RAW_Ventas_Excel',
+  'RAW_Cartera',
+  'RAW_Inventario',
+  'RAW_Sin_Rotar',
+  'RES_Cartera_Buckets',
+  'RES_Cartera_Mora',
+  'RES_Inventario_Linea',
 ]
 
 export async function GET(

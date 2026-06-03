@@ -1,9 +1,9 @@
-import { getSheetData, rowsToObjects } from '@/lib/sheets'
+import { getSheetData, rowsToObjects, normalizeVentasColumns } from '@/lib/sheets'
 import { parseFecha } from '@/lib/sheets'
 
 export async function GET() {
   try {
-    const rows = rowsToObjects(await getSheetData('LS_VENTAS'))
+    const rows = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
 
     let maxTs = 0
     let maxFechaStr = ''
@@ -30,7 +30,8 @@ export async function GET() {
     const label = fecha.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })
 
     return Response.json({ ok: true, fecha: label, raw: maxFechaStr })
-  } catch {
-    return Response.json({ ok: false, error: 'No se pudo leer LS_VENTAS' }, { status: 500 })
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    return Response.json({ ok: false, error: msg }, { status: 500 })
   }
 }

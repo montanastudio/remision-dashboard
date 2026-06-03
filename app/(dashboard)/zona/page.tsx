@@ -2,7 +2,7 @@ import { getServerSession } from 'next-auth'
 import { redirect } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
 import { getPermissions, canAccess } from '@/lib/permissions'
-import { getSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
+import { getSheetData, rowsToObjects, normalizeVentasColumns, parseNum } from '@/lib/sheets'
 import { filtrarVentas } from '@/lib/filtro-ventas'
 import { ZONAS_CONFIG } from '@/lib/zonas-config'
 import ZonaInteractivo from './ZonaInteractivo'
@@ -153,8 +153,7 @@ export default async function ZonaPage({
   let rawRows: Row[] = []
 
   try {
-    const raw = await getSheetData('LS_VENTAS')
-    rawRows = rowsToObjects(raw)
+    rawRows = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
   } catch {
     // empty
   }

@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   try {
-    const raw = await getSheetData('LS_VENTAS')
+    const raw = await getSheetData('RAW_Ventas_Excel')
     const headers = raw[0] ?? []
     const sample  = raw.slice(1, 4) // 3 filas de muestra
 
