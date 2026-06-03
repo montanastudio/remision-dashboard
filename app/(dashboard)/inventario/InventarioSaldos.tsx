@@ -39,7 +39,6 @@ function extractValorTotal(r: Row): number {
 
 // ── Detección de curva (M / L / Y) ──────────────────────────────────
 const CURVAS_CONOCIDAS = ['M', 'L', 'Y', 'C'] as const
-type Curva = typeof CURVAS_CONOCIDAS[number]
 const CURVA_COLOR: Record<string, string> = { M: '#3b82f6', L: '#22c55e', Y: '#f59e0b', C: '#a855f7' }
 
 function detectarCurva(r: Row | Record<string, string | number>): string {

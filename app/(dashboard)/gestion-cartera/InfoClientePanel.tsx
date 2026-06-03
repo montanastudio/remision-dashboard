@@ -251,7 +251,6 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
               {data.facturas
                 .filter((f) => lugarFiltro === '__todos__' || f.lugar === lugarFiltro)
                 .map((f, i) => {
-                const bs = BUCKET_STYLE[f.bucket]
                 return (
                   <div key={`${f.numero}-${i}`}
                     className="rounded-[8px] border p-3" style={{ borderColor: 'var(--border)' }}>

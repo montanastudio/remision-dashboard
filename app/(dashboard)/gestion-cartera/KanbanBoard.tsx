@@ -171,7 +171,7 @@ export default function KanbanBoard({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setConfirmDeleteId(null)}>
           <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-xl p-5 w-72" onClick={(e) => e.stopPropagation()}>
             <div className="text-[13px] font-semibold text-[var(--text)] mb-2">¿Eliminar lista?</div>
-            <div className="text-[12px] text-[var(--text-muted)] mb-4">Los clientes de esta lista pasarán a "Sin clasificar".</div>
+            <div className="text-[12px] text-[var(--text-muted)] mb-4">Los clientes de esta lista pasarán a &quot;Sin clasificar&quot;.</div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setConfirmDeleteId(null)} className="px-3 py-1.5 rounded-[6px] text-[11px] text-[var(--text-muted)] hover:text-[var(--text)]">Cancelar</button>
               <button onClick={() => eliminarLista(confirmDeleteId)} className="px-3 py-1.5 rounded-[6px] text-[11px] font-medium bg-red-500 text-white hover:opacity-90">Eliminar</button>
