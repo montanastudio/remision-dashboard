@@ -169,7 +169,6 @@ export default async function ClientesPage({
 
   const totalVal   = clientes.reduce((s, c) => s + c.valor, 0)
   const topCliente = clientes[0]
-  const ticket     = clientes.length ? totalVal / clientes.length : 0
 
   const todosClientes = clientes.map((c, i) => ({
     _rank:    String(i + 1),
