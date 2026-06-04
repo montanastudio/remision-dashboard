@@ -8,11 +8,6 @@ const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID!
 const CACHE_TTL = 30_000
 const _cache = new Map<string, { data: string[][], ts: number }>()
 
-/** Limpia el caché completo o una hoja específica. Útil para forzar re-fetch. */
-export function clearCache(sheetName?: SheetName) {
-  if (sheetName) { _cache.delete(sheetName) } else { _cache.clear() }
-}
-
 function getAuth(write = false) {
   return new google.auth.GoogleAuth({
     credentials: {
@@ -69,6 +64,11 @@ export async function getSheetData(sheetName: SheetName): Promise<string[][]> {
   const data = (response.data.values ?? []) as string[][]
   _cache.set(sheetName, { data, ts: now })
   return data
+}
+
+/** Limpia el caché completo o una hoja específica. Útil para forzar re-fetch. */
+export function clearCache(sheetName?: SheetName) {
+  if (sheetName) { _cache.delete(sheetName) } else { _cache.clear() }
 }
 
 export async function appendSheetRow(sheetName: SheetName, values: string[]): Promise<void> {
