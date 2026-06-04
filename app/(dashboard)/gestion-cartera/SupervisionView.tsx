@@ -52,19 +52,22 @@ export default function SupervisionView({ clientes }: Props) {
   const [notas, setNotas] = useState<Nota[]>([])
   const [recordatorios, setRecordatorios] = useState<Recordatorio[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
 
   const today = toISO(new Date())
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/gestion-cartera/notas').then((r) => r.json()),
-      fetch('/api/gestion-cartera/recordatorios').then((r) => r.json()),
+      fetch('/api/gestion-cartera/notas').then((r) => r.json()).catch(() => ({ notas: [] })),
+      fetch('/api/gestion-cartera/recordatorios').then((r) => r.json()).catch(() => ({ recordatorios: [] })),
     ]).then(([n, r]) => {
       setNotas(n.notas ?? [])
       setRecordatorios(r.recordatorios ?? [])
-      setLoading(false)
-    })
+      if (!n.notas && !r.recordatorios) {
+        setLoadError('No se pudieron cargar los datos. Verifica que GOOGLE_SHEETS_ID_CARTERA esté configurado en Vercel.')
+      }
+    }).finally(() => setLoading(false))
   }, [])
 
   const { desde, label: periodoLabel } = useMemo(() => {
@@ -113,6 +116,15 @@ export default function SupervisionView({ clientes }: Props) {
 
   if (loading) {
     return <div className="py-12 text-center text-[12px] text-[var(--text-muted)]">Cargando datos de supervisión...</div>
+  }
+
+  if (loadError) {
+    return (
+      <div className="rounded-card border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-5 py-6 text-center">
+        <div className="text-[13px] font-semibold text-red-600 dark:text-red-400 mb-1">No se pudieron cargar los datos</div>
+        <div className="text-[12px] text-red-500 dark:text-red-400 leading-relaxed">{loadError}</div>
+      </div>
+    )
   }
 
   return (
