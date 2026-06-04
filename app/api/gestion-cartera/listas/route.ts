@@ -35,16 +35,23 @@ export async function POST(req: NextRequest) {
   const rows = await getCarteraSheet('GC_Listas')
   const orden = String(rows.length) // rows includes header
 
+  const id = genId()
+  const colorFinal = color || '#3b82f6'
+
   await appendCarteraRow('GC_Listas', [
-    genId(),
+    id,
     nombre.trim(),
-    color || '#3b82f6',
+    colorFinal,
     orden,
     user.name ?? '',
     todayISO(),
   ])
 
-  return NextResponse.json({ ok: true })
+  // Devolver la lista creada para que el cliente la use directamente
+  return NextResponse.json({
+    ok: true,
+    lista: { ID: id, Nombre: nombre.trim(), Color: colorFinal, Orden: orden },
+  })
 }
 
 export async function DELETE(req: NextRequest) {

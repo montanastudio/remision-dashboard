@@ -100,18 +100,14 @@ export default function KanbanBoard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nombre: nuevaListaNombre.trim(), color: nuevaListaColor }),
       })
-      if (res.ok) {
-        const data = await fetch('/api/gestion-cartera/listas').then((r) => r.json())
-        const nueva = (data.listas as Lista[]).find(
-          (l) => l.Nombre === nuevaListaNombre.trim() && l.Color === nuevaListaColor
-        )
-        if (nueva) onListaCreada(nueva)
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.lista) {
+        onListaCreada(data.lista as Lista)
         setNuevaListaNombre('')
         setNuevaListaColor('#3b82f6')
         setShowNuevaLista(false)
       } else {
-        const err = await res.json().catch(() => ({}))
-        setErrorLista(err.error ?? `Error ${res.status} — verifica que GOOGLE_SHEETS_ID_CARTERA esté configurado`)
+        setErrorLista(data.error ?? `Error ${res.status} — verifica que GOOGLE_SHEETS_ID_CARTERA esté configurado en Vercel`)
       }
     } catch {
       setErrorLista('No se pudo conectar con el servidor')
