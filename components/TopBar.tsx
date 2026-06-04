@@ -61,7 +61,6 @@ function PeriodoPickerFallback() {
 
 export default function TopBar({ onMenuToggle }: TopBarProps) {
   const pathname = usePathname()
-  const router   = useRouter()
   const { data: session } = useSession()
   const user = session?.user as { name?: string; initials?: string } | undefined
 
