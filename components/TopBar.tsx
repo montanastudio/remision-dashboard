@@ -77,6 +77,8 @@ export default function TopBar({ onMenuToggle }: TopBarProps) {
     if (syncing) return
     setSyncing(true)
     setSyncDone(false)
+    setFechaData(null)   // fuerza re-fetch del popup al abrirlo de nuevo
+    setPopupOpen(false)  // cierra popup si está abierto
     try {
       await fetch('/api/sync', { method: 'POST' })
       router.refresh()
