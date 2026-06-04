@@ -22,7 +22,6 @@ const BUCKET_BADGE: Record<string, { bg: string; text: string }> = {
   '+90 días':   { bg: 'bg-red-100 dark:bg-red-950/60',       text: 'text-red-800 dark:text-red-300' },
   '61-90 días': { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-600 dark:text-orange-400' },
   '31-60 días': { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-500 dark:text-orange-400' },
-  '1-30 días':  { bg: 'bg-yellow-100 dark:bg-yellow-950/60', text: 'text-yellow-600 dark:text-yellow-500' },
 }
 
 function fmt(n: number) {

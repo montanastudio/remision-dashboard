@@ -43,7 +43,6 @@ const BUCKET_STYLE: Record<string, { bg: string; text: string; bar: string }> = 
   '+90 días':   { bg: 'bg-red-100 dark:bg-red-950/50',       text: 'text-red-800 dark:text-red-300',    bar: 'bg-red-800' },
   '61-90 días': { bg: 'bg-orange-100 dark:bg-orange-950/50', text: 'text-orange-600',                   bar: 'bg-orange-500' },
   '31-60 días': { bg: 'bg-orange-100 dark:bg-orange-950/50', text: 'text-orange-500',                   bar: 'bg-orange-400' },
-  '1-30 días':  { bg: 'bg-yellow-100 dark:bg-yellow-950/50', text: 'text-yellow-600',                   bar: 'bg-yellow-400' },
 }
 
 interface Props { nit: string; nombre: string; onClose: () => void }
