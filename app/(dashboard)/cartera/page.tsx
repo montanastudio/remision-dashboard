@@ -34,9 +34,9 @@ export default async function CarteraPage() {
   }))
 
   // Lista de vendedores únicos para el filtro
-  const vendedores = [...new Set(
+  const vendedores = Array.from(new Set(
     carteraNorm.map(r => (r['Vendedor'] ?? '').trim()).filter(Boolean)
-  )].sort()
+  )).sort()
 
   return (
     <div className="fade-in-up">

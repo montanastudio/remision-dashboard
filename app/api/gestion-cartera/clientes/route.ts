@@ -71,9 +71,9 @@ export async function GET() {
     .sort((a, b) => b.saldo - a.saldo)
 
   // Lista global de vendedores únicos para el filtro
-  const allVendedores = [...new Set(
+  const allVendedores = Array.from(new Set(
     baseClientes.flatMap(c => Array.from(c._vendedores))
-  )].sort()
+  )).sort()
 
   // 2. Gestión meta
   const metaRows = rowsToObjectsCartera(await getCarteraSheet('GC_ClienteMeta'))

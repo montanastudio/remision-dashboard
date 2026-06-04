@@ -63,7 +63,7 @@ export default async function GestionCarteraPage() {
     .filter((c) => c.saldo > 0)
     .sort((a, b) => b.saldo - a.saldo)
 
-  const allVendedores = [...new Set(baseClientes.flatMap(c => Array.from(c._vendedores)))].sort()
+  const allVendedores = Array.from(new Set(baseClientes.flatMap(c => Array.from(c._vendedores)))).sort()
 
   // ── Gestión meta ─────────────────────────────────────────────────
   let metaRows: Record<string, string>[] = []
