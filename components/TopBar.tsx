@@ -1,7 +1,7 @@
 'use client'
 
-import { Suspense, useState, useRef, useEffect } from 'react'
-import { usePathname } from 'next/navigation'
+import { Suspense, useState, useRef, useEffect, useCallback } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
 import DarkModeToggle from './DarkModeToggle'
 import PeriodoPicker from './PeriodoPicker'
 import { useSession } from 'next-auth/react'
@@ -61,12 +61,31 @@ function PeriodoPickerFallback() {
 
 export default function TopBar({ onMenuToggle }: TopBarProps) {
   const pathname = usePathname()
+  const router   = useRouter()
   const { data: session } = useSession()
   const user = session?.user as { name?: string; initials?: string } | undefined
 
   const title = PAGE_TITLES[pathname] ?? 'Dashboard'
   const sub   = PAGE_SUBS[pathname]   ?? 'REMISION GROUP'
   const showFiltro = FILTRO_PAGES.has(pathname)
+
+  // ── Sincronización ───────────────────────────────────────────────────
+  const [syncing,   setSyncing]   = useState(false)
+  const [syncDone,  setSyncDone]  = useState(false)
+
+  const handleSync = useCallback(async () => {
+    if (syncing) return
+    setSyncing(true)
+    setSyncDone(false)
+    try {
+      await fetch('/api/sync', { method: 'POST' })
+      router.refresh()
+      setSyncDone(true)
+      setTimeout(() => setSyncDone(false), 2500)
+    } finally {
+      setSyncing(false)
+    }
+  }, [syncing, router])
 
   // ── Estado del popup de última fecha ────────────────────────────────
   const [popupOpen,  setPopupOpen]  = useState(false)
@@ -128,6 +147,23 @@ export default function TopBar({ onMenuToggle }: TopBarProps) {
             <PeriodoPicker />
           </Suspense>
         )}
+
+        {/* Botón sincronizar */}
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          title={syncDone ? '¡Datos actualizados!' : 'Sincronizar con Google Sheets'}
+          className="relative w-9 h-9 rounded-[8px] flex items-center justify-center transition-colors bg-[#f1f5f9] dark:bg-[#1e2d47] disabled:opacity-60"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke={syncDone ? '#22c55e' : '#475569'} strokeWidth="2"
+            className={syncing ? 'animate-spin' : ''}>
+            <path d="M21 12a9 9 0 11-6.219-8.56" strokeLinecap="round" />
+          </svg>
+          {syncDone && (
+            <span className="absolute top-[5px] right-[5px] w-[7px] h-[7px] rounded-full bg-[#22c55e]" />
+          )}
+        </button>
 
         <DarkModeToggle />
 

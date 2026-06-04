@@ -4,9 +4,14 @@ export { parseFecha } from './fecha'
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID!
 
 // Simple in-memory cache to avoid hitting Sheets API rate limits.
-// TTL: 60 s — stale data per-minute is acceptable for a management dashboard.
-const CACHE_TTL = 60_000
+// TTL: 30 s — stale data per-30s is acceptable for a management dashboard.
+const CACHE_TTL = 30_000
 const _cache = new Map<string, { data: string[][], ts: number }>()
+
+/** Limpia el caché completo o una hoja específica. Útil para forzar re-fetch. */
+export function clearCache(sheetName?: SheetName) {
+  if (sheetName) { _cache.delete(sheetName) } else { _cache.clear() }
+}
 
 function getAuth(write = false) {
   return new google.auth.GoogleAuth({
