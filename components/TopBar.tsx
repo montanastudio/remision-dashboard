@@ -1,7 +1,7 @@
 'use client'
 
 import { Suspense, useState, useRef, useEffect, useCallback } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import DarkModeToggle from './DarkModeToggle'
 import PeriodoPicker from './PeriodoPicker'
 import { useSession } from 'next-auth/react'
@@ -77,17 +77,16 @@ export default function TopBar({ onMenuToggle }: TopBarProps) {
     if (syncing) return
     setSyncing(true)
     setSyncDone(false)
-    setFechaData(null)   // fuerza re-fetch del popup al abrirlo de nuevo
-    setPopupOpen(false)  // cierra popup si está abierto
+    setFechaData(null)
+    setPopupOpen(false)
     try {
       await fetch('/api/sync', { method: 'POST' })
-      router.refresh()
-      setSyncDone(true)
-      setTimeout(() => setSyncDone(false), 2500)
-    } finally {
+      // Hard reload garantiza que no usa caché del browser ni instancia caliente de Vercel
+      window.location.reload()
+    } catch {
       setSyncing(false)
     }
-  }, [syncing, router])
+  }, [syncing])
 
   // ── Estado del popup de última fecha ────────────────────────────────
   const [popupOpen,  setPopupOpen]  = useState(false)
