@@ -50,6 +50,7 @@ export default function KanbanBoard({
   const [nuevaListaNombre, setNuevaListaNombre] = useState('')
   const [nuevaListaColor, setNuevaListaColor] = useState('#3b82f6')
   const [savingLista, setSavingLista] = useState(false)
+  const [errorLista, setErrorLista] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   const COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#64748b']
@@ -92,23 +93,31 @@ export default function KanbanBoard({
   async function crearLista() {
     if (!nuevaListaNombre.trim() || savingLista) return
     setSavingLista(true)
-    const res = await fetch('/api/gestion-cartera/listas', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre: nuevaListaNombre.trim(), color: nuevaListaColor }),
-    })
-    if (res.ok) {
-      // Reload listas
-      const data = await fetch('/api/gestion-cartera/listas').then((r) => r.json())
-      const nueva = (data.listas as Lista[]).find(
-        (l) => l.Nombre === nuevaListaNombre.trim() && l.Color === nuevaListaColor
-      )
-      if (nueva) onListaCreada(nueva)
-      setNuevaListaNombre('')
-      setNuevaListaColor('#3b82f6')
-      setShowNuevaLista(false)
+    setErrorLista('')
+    try {
+      const res = await fetch('/api/gestion-cartera/listas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre: nuevaListaNombre.trim(), color: nuevaListaColor }),
+      })
+      if (res.ok) {
+        const data = await fetch('/api/gestion-cartera/listas').then((r) => r.json())
+        const nueva = (data.listas as Lista[]).find(
+          (l) => l.Nombre === nuevaListaNombre.trim() && l.Color === nuevaListaColor
+        )
+        if (nueva) onListaCreada(nueva)
+        setNuevaListaNombre('')
+        setNuevaListaColor('#3b82f6')
+        setShowNuevaLista(false)
+      } else {
+        const err = await res.json().catch(() => ({}))
+        setErrorLista(err.error ?? `Error ${res.status} — verifica que GOOGLE_SHEETS_ID_CARTERA esté configurado`)
+      }
+    } catch {
+      setErrorLista('No se pudo conectar con el servidor')
+    } finally {
+      setSavingLista(false)
     }
-    setSavingLista(false)
   }
 
   async function eliminarLista(id: string) {
@@ -150,8 +159,11 @@ export default function KanbanBoard({
                   style={{ background: c }} />
               ))}
             </div>
+            {errorLista && (
+              <p className="text-[11px] text-red-500 mb-3 leading-tight">{errorLista}</p>
+            )}
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowNuevaLista(false)}
+              <button onClick={() => { setShowNuevaLista(false); setErrorLista('') }}
                 className="px-3 py-1.5 rounded-[6px] text-[11px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">
                 Cancelar
               </button>
@@ -180,9 +192,9 @@ export default function KanbanBoard({
       )}
 
       {/* Kanban columns */}
-      <div className="flex gap-3 overflow-x-auto pb-4" style={{ minHeight: 400 }}>
+      <div className="flex gap-3 overflow-x-auto pb-4">
         {columns.map((col) => (
-          <div key={col.id} className="flex-shrink-0 w-[270px] flex flex-col">
+          <div key={col.id} className="flex-shrink-0 w-[270px] flex flex-col" style={{ maxHeight: 'calc(100vh - 260px)' }}>
             {/* Column header */}
             <div className="flex items-center justify-between mb-2 px-1">
               <div className="flex items-center gap-2">
@@ -198,8 +210,8 @@ export default function KanbanBoard({
               )}
             </div>
 
-            {/* Cards */}
-            <div className="flex flex-col gap-2 flex-1">
+            {/* Cards — scroll vertical por columna */}
+            <div className="flex flex-col gap-2 flex-1 overflow-y-auto pr-0.5">
               {col.clientes.length === 0 && (
                 <div className="rounded-[8px] border-2 border-dashed border-[var(--border)] p-4 text-center text-[11px] text-[var(--text-muted)]">
                   Vacía
