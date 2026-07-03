@@ -271,7 +271,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       else if (m.qty > cuts[0]) nivel = 1
       return { ...m, nivel }
     }).sort((a, b) => b.nivel - a.nivel || b.valor - a.valor)
-  }, [enriched, marcaFilter])
+  }, [enriched, marcaFilter, stockMin])
 
   const str = (r: EnrichedRow, k: string) => String(r[k] ?? '')
 
@@ -302,6 +302,37 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     })
     return map
   }, [enriched, modeloFilter])
+
+  // ── Fichas por referencia base con desglose por color ─────────────────────
+  // "VTK-6240M-01" → base "VTK-6240" + curva "M" + color "01"
+  const refGroups = useMemo(() => {
+    if (!modeloFilter) return []
+    const map: Record<string, { base: string; qty: number; valor: number; cedi: number; zf: number; colores: Record<string, number> }> = {}
+    enriched
+      .filter(r => pickModelo(r) === modeloFilter)
+      .filter(r => !curvaFilter || detectarCurva(r) === curvaFilter)
+      .forEach(r => {
+        const ref = str(r, 'Referencia')
+        const m = ref.match(/^(.*?)([MLYC])-(\d+)$/)
+        const base  = m ? m[1] : (ref || 'Sin referencia')
+        const color = m ? m[3] : ''
+        if (!map[base]) map[base] = { base, qty: 0, valor: 0, cedi: 0, zf: 0, colores: {} }
+        const g = map[base]
+        g.qty   += r._saldo
+        g.valor += r._valorTotal
+        g.cedi  += r._saldoCedi
+        g.zf    += r._saldoZF
+        if (color) g.colores[color] = (g.colores[color] ?? 0) + r._saldo
+      })
+    return Object.values(map)
+      .map(g => ({
+        ...g,
+        colores: Object.entries(g.colores)
+          .map(([color, qty]) => ({ color, qty }))
+          .sort((a, b) => a.color.localeCompare(b.color)),
+      }))
+      .sort((a, b) => b.qty - a.qty)
+  }, [enriched, modeloFilter, curvaFilter])
 
   // ── Tabla filtrada y ordenada ──────────────────────────────────────────────
   const rows = useMemo(() => {
@@ -334,7 +365,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       return sortDir === 'asc' ? va - (vb as number) : (vb as number) - va
     })
     return list
-  }, [enriched, marcaFilter, modeloFilter, curvaFilter, query, sortKey, sortDir])
+  }, [enriched, marcaFilter, modeloFilter, curvaFilter, stockMin, query, sortKey, sortDir])
 
   // ── KPIs reactivos al filtro activo ───────────────────────────────────────
   const kpiTotals = useMemo(() => {
@@ -667,6 +698,55 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
               <div className="mt-1.5 h-[3px] bg-[var(--brand-blue)] rounded-full opacity-30" />
               <div className="text-[9px] text-[var(--text-muted)] mt-0.5">{curvasDelModelo.length} curvas</div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Fichas por referencia base con desglose por color ─────────────── */}
+      {modeloFilter && refGroups.length > 0 && (
+        <div className="mb-4">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
+            {modeloFilter} — por referencia · {refGroups.length}
+            {curvaFilter && <span className="font-normal normal-case"> · curva {curvaFilter}</span>}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {refGroups.map(g => (
+              <div key={g.base} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] p-3">
+                {/* Referencia base + total */}
+                <div className="flex items-baseline justify-between mb-2 gap-2">
+                  <span className="text-[12px] font-bold text-[var(--text)] num truncate">{g.base}</span>
+                  <span className="text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
+                    {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
+                  </span>
+                </div>
+
+                {/* Desglose por color */}
+                {g.colores.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {g.colores.map(c => (
+                      <span key={c.color}
+                        className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--card)] px-2 py-[2px] text-[10px] leading-none">
+                        <span className="text-[var(--text-muted)]">Color {c.color}</span>
+                        <span className="font-semibold text-[var(--text)] num">{fmtN(c.qty)}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* Bodegas + valor */}
+                <div className="flex items-center justify-between pt-1.5 border-t border-[var(--border)]">
+                  <div className="flex items-center gap-2.5">
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#3b82f6]" title="Bodega CEDI">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />{fmtN(g.cedi)}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#f59e0b]" title="Zona Franca">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />{fmtN(g.zf)}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-[var(--text-muted)] num">{fmt(g.valor)}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
