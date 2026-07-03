@@ -37,10 +37,20 @@ function extractSaldo(r: Row): number {
   return parseNum(pickCol(r, 'Stock Total', 'Saldo Sistema', 'Saldo', 'Existencias', 'Cantidad', 'Saldo (und)', 'Und. Stock'))
 }
 function extractSaldoCedi(r: Row): number {
-  return parseNum(pickCol(r, 'Stock BODEGA CEDI', 'Saldo CEDI', 'CEDI'))
+  const exact = pickCol(r, 'Stock BODEGA CEDI', 'Stock Bodega CEDI', 'Saldo CEDI', 'CEDI')
+  if (exact !== '') return parseNum(exact)
+  // búsqueda insensible a mayúsculas si el nombre exacto no coincide
+  const key = Object.keys(r).find(k => k.toLowerCase().includes('cedi'))
+  return key ? parseNum(r[key]) : 0
 }
 function extractSaldoZF(r: Row): number {
-  return parseNum(pickCol(r, 'Stock BODEGA ZONA FRANCA', 'Saldo ZF', 'Zona Franca', 'ZF'))
+  const exact = pickCol(r, 'Stock BODEGA ZONA FRANCA', 'Stock Bodega ZONA FRANCA', 'Saldo ZF', 'Zona Franca', 'ZF')
+  if (exact !== '') return parseNum(exact)
+  const key = Object.keys(r).find(k => {
+    const l = k.toLowerCase()
+    return l.includes('zona') || l.includes('franca') || l === 'zf'
+  })
+  return key ? parseNum(r[key]) : 0
 }
 function extractPrecio(r: Row): number {
   return parseNum(pickCol(r, 'Precio Venta ($)', 'Valor Venta ($)', 'Precio Venta', 'Precio', 'Vr. Unitario ($)', 'P. Venta'))
