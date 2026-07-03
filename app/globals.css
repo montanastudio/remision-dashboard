@@ -82,3 +82,33 @@ body {
 
 /* ── Number font ── */
 .num { font-family: 'DM Mono', monospace; }
+
+/* ── Dual-range slider (filtro de pares en inventario) ── */
+input[type='range'].dual-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+}
+input[type='range'].dual-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  pointer-events: auto;
+  width: 15px;
+  height: 15px;
+  border-radius: 9999px;
+  background: var(--card);
+  border: 2px solid var(--brand-blue);
+  cursor: grab;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+input[type='range'].dual-range::-webkit-slider-thumb:active { cursor: grabbing; }
+input[type='range'].dual-range::-moz-range-thumb {
+  pointer-events: auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 9999px;
+  background: var(--card);
+  border: 2px solid var(--brand-blue);
+  cursor: grab;
+}

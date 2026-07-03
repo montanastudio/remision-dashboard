@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { fmt, fmtN } from '@/lib/format'
 
@@ -154,6 +154,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const [modeloFilter, setModeloFilter] = useState<string | null>(null)
   const [curvaFilter,  setCurvaFilter]  = useState<string | null>(null)
   const [stockMin,     setStockMin]     = useState(0)
+  const [stockMax,     setStockMax]     = useState<number | null>(null) // null = sin tope
   const [query,        setQuery]        = useState('')
   const [sortKey,      setSortKey]      = useState<SortKey>('Valor Total')
   const [sortDir,      setSortDir]      = useState<SortDir>('desc')
@@ -239,18 +240,21 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   ]
 
   // ── Modelos del filtro de marca activo ─────────────────────────────────────
-  const STOCK_PRESETS = [
-    { label: 'Todos',   min: 0   },
-    { label: '+1',      min: 1   },
-    { label: '+10',     min: 10  },
-    { label: '+50',     min: 50  },
-    { label: '+100',    min: 100 },
-    { label: '+500',    min: 500 },
-  ]
+  // ── Rango de pares (slider) ────────────────────────────────────────────────
+  const maxSaldo = useMemo(
+    () => enriched.reduce((m, r) => Math.max(m, r._saldo), 0),
+    [enriched]
+  )
+  const effStockMax  = stockMax ?? maxSaldo
+  const rangoActivo  = stockMin > 0 || (stockMax !== null && stockMax < maxSaldo)
+  const inRango      = useCallback(
+    (saldo: number) => saldo >= stockMin && saldo <= effStockMax,
+    [stockMin, effStockMax]
+  )
 
   const modelos = useMemo(() => {
     const base = (marcaFilter ? enriched.filter(r => r._marca === marcaFilter) : enriched)
-      .filter(r => stockMin === 0 || r._saldo >= stockMin)
+      .filter(r => inRango(r._saldo))
     const map: Record<string, { valor: number; qty: number }> = {}
     base.forEach(r => {
       const m = pickModelo(r)
@@ -271,7 +275,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       else if (m.qty > cuts[0]) nivel = 1
       return { ...m, nivel }
     }).sort((a, b) => b.nivel - a.nivel || b.valor - a.valor)
-  }, [enriched, marcaFilter, stockMin])
+  }, [enriched, marcaFilter, inRango])
 
   const str = (r: EnrichedRow, k: string) => String(r[k] ?? '')
 
@@ -341,7 +345,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     if (marcaFilter)  list = list.filter(r => r._marca === marcaFilter)
     if (modeloFilter) list = list.filter(r => pickModelo(r) === modeloFilter)
     if (curvaFilter)  list = list.filter(r => detectarCurva(r) === curvaFilter)
-    if (stockMin > 0) list = list.filter(r => r._saldo >= stockMin)
+    if (rangoActivo)  list = list.filter(r => inRango(r._saldo))
     if (q) list = list.filter(r =>
       pickDesc(r).toLowerCase().includes(q)    ||
       str(r, 'Referencia').toLowerCase().includes(q) ||
@@ -365,7 +369,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       return sortDir === 'asc' ? va - (vb as number) : (vb as number) - va
     })
     return list
-  }, [enriched, marcaFilter, modeloFilter, curvaFilter, stockMin, query, sortKey, sortDir])
+  }, [enriched, marcaFilter, modeloFilter, curvaFilter, rangoActivo, inRango, query, sortKey, sortDir])
 
   // ── KPIs reactivos al filtro activo ───────────────────────────────────────
   const kpiTotals = useMemo(() => {
@@ -602,30 +606,65 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
 
       {/* ── Filtros de búsqueda y cantidad ───────────────────────────────── */}
       <div className="mb-3 space-y-2">
-        {/* Filtro de cantidad de pares */}
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* Filtro de rango de pares (slider doble) */}
+        <div className="flex items-center gap-3 flex-wrap">
           <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] flex-shrink-0">
             Pares
           </span>
-          <div className="flex rounded-[8px] border border-[var(--border)] overflow-hidden">
-            {STOCK_PRESETS.map(p => (
-              <button
-                key={p.min}
-                onClick={() => setStockMin(p.min)}
-                className={`px-3 py-[5px] text-[11px] font-medium transition-colors whitespace-nowrap ${
-                  stockMin === p.min
-                    ? 'bg-[var(--brand-blue)] text-white'
-                    : 'text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
+
+          {/* Slider */}
+          <div className="relative w-[240px] h-5 flex-shrink-0">
+            <div className="absolute top-1/2 -translate-y-1/2 h-[4px] w-full rounded-full bg-[var(--border)]" />
+            {maxSaldo > 0 && (
+              <div
+                className="absolute top-1/2 -translate-y-1/2 h-[4px] rounded-full bg-[var(--brand-blue)]"
+                style={{
+                  left:  `${(stockMin / maxSaldo) * 100}%`,
+                  width: `${Math.max(((effStockMax - stockMin) / maxSaldo) * 100, 0)}%`,
+                }}
+              />
+            )}
+            <input
+              type="range" min={0} max={maxSaldo} value={stockMin}
+              onChange={e => setStockMin(Math.min(Number(e.target.value), effStockMax))}
+              className="dual-range absolute inset-0 w-full h-full m-0"
+            />
+            <input
+              type="range" min={0} max={maxSaldo} value={effStockMax}
+              onChange={e => {
+                const v = Number(e.target.value)
+                setStockMax(v >= maxSaldo ? null : Math.max(v, stockMin))
+              }}
+              className="dual-range absolute inset-0 w-full h-full m-0"
+            />
           </div>
-          {stockMin > 0 && (
-            <span className="text-[10px] text-[var(--text-muted)]">
-              Mostrando SKUs con {stockMin}+ pares en stock
-            </span>
+
+          {/* Inputs numéricos para definir el rango exacto */}
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number" min={0} max={effStockMax} value={stockMin}
+              onChange={e => setStockMin(Math.max(0, Math.min(Number(e.target.value) || 0, effStockMax)))}
+              className="w-[64px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] px-2 py-[4px] text-[11px] num text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
+            />
+            <span className="text-[10px] text-[var(--text-muted)]">a</span>
+            <input
+              type="number" min={stockMin} value={effStockMax}
+              onChange={e => {
+                const v = Number(e.target.value) || 0
+                setStockMax(v >= maxSaldo ? null : Math.max(v, stockMin))
+              }}
+              className="w-[64px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] px-2 py-[4px] text-[11px] num text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
+            />
+            <span className="text-[10px] text-[var(--text-muted)]">pares</span>
+          </div>
+
+          {rangoActivo && (
+            <button
+              onClick={() => { setStockMin(0); setStockMax(null) }}
+              className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-2"
+            >
+              Restablecer
+            </button>
           )}
         </div>
 
@@ -756,7 +795,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
         {marcaFilter  ? ` · ${marcaFilter}`              : ''}
         {modeloFilter ? ` · ${modeloFilter}`             : ''}
         {curvaFilter  ? ` · Curva ${curvaFilter}`        : ''}
-        {stockMin > 0 ? ` · ${stockMin}+ pares`         : ''}
+        {rangoActivo   ? ` · ${fmtN(stockMin)}–${fmtN(effStockMax)} pares` : ''}
         {query        ? ` · "${query}"`                  : ''}
       </div>
 
