@@ -1,27 +1,39 @@
 import { NextResponse } from 'next/server'
-import { getSheetData } from '@/lib/sheets'
+import { getSheetData, rowsToObjects } from '@/lib/sheets'
 
 export const dynamic = 'force-dynamic'
 
-async function probe(name: Parameters<typeof getSheetData>[0]) {
-  try {
-    const rows = await getSheetData(name)
-    return {
-      ok: true,
-      totalRows: rows.length - 1,
-      headers: rows[0] ?? [],
-      sample: rows.slice(1, 3),
-    }
-  } catch (e) {
-    return { ok: false, error: String(e) }
-  }
-}
-
 export async function GET() {
-  const [inv, sr, res] = await Promise.all([
-    probe('RAW_Inventario'),
-    probe('RAW_Sin_Rotar'),
-    probe('RES_Inventario_Linea'),
-  ])
-  return NextResponse.json({ RAW_Inventario: inv, RAW_Sin_Rotar: sr, RES_Inventario_Linea: res })
+  try {
+    const rows = await getSheetData('RAW_Inventario')
+    const headers = rows[0] ?? []
+    const objects = rowsToObjects(rows)
+    const sample  = objects.slice(0, 3)
+
+    // Qué columnas contienen keywords de bodega
+    const bodegaKeys = headers.filter(h => {
+      const l = h.toLowerCase()
+      return l.includes('cedi') || l.includes('zona') || l.includes('franca') || l.includes('bodega') || l.includes('stock')
+    })
+
+    // Valores de bodega en las primeras 5 filas
+    const bodegaSample = objects.slice(0, 5).map(r => {
+      const out: Record<string, string> = {}
+      bodegaKeys.forEach(k => { out[k] = r[k] ?? '' })
+      return out
+    })
+
+    // Cabeceras completas con índice
+    const headersIndexed = headers.map((h, i) => `[${i}] ${h}`)
+
+    return NextResponse.json({
+      totalFilas:      rows.length - 1,
+      headersIndexed,
+      bodegaKeys,
+      bodegaSample,
+      primeraFila:     sample[0] ?? null,
+    })
+  } catch (e) {
+    return NextResponse.json({ error: String(e) }, { status: 500 })
+  }
 }

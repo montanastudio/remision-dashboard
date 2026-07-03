@@ -144,6 +144,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const [marcaFilter,  setMarcaFilter]  = useState<string | null>(null)
   const [modeloFilter, setModeloFilter] = useState<string | null>(null)
   const [curvaFilter,  setCurvaFilter]  = useState<string | null>(null)
+  const [stockMin,     setStockMin]     = useState(0)
   const [query,        setQuery]        = useState('')
   const [sortKey,      setSortKey]      = useState<SortKey>('Valor Total')
   const [sortDir,      setSortDir]      = useState<SortDir>('desc')
@@ -224,8 +225,18 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   ]
 
   // ── Modelos del filtro de marca activo ─────────────────────────────────────
+  const STOCK_PRESETS = [
+    { label: 'Todos',   min: 0   },
+    { label: '+1',      min: 1   },
+    { label: '+10',     min: 10  },
+    { label: '+50',     min: 50  },
+    { label: '+100',    min: 100 },
+    { label: '+500',    min: 500 },
+  ]
+
   const modelos = useMemo(() => {
-    const base = marcaFilter ? enriched.filter(r => r._marca === marcaFilter) : enriched
+    const base = (marcaFilter ? enriched.filter(r => r._marca === marcaFilter) : enriched)
+      .filter(r => stockMin === 0 || r._saldo >= stockMin)
     const map: Record<string, { valor: number; qty: number }> = {}
     base.forEach(r => {
       const m = pickModelo(r)
@@ -285,6 +296,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     if (marcaFilter)  list = list.filter(r => r._marca === marcaFilter)
     if (modeloFilter) list = list.filter(r => pickModelo(r) === modeloFilter)
     if (curvaFilter)  list = list.filter(r => detectarCurva(r) === curvaFilter)
+    if (stockMin > 0) list = list.filter(r => r._saldo >= stockMin)
     if (q) list = list.filter(r =>
       pickDesc(r).toLowerCase().includes(q)    ||
       str(r, 'Referencia').toLowerCase().includes(q) ||
@@ -543,8 +555,36 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
         </div>
       )}
 
-      {/* ── Buscador ──────────────────────────────────────────────────────── */}
-      <div className="mb-3">
+      {/* ── Filtros de búsqueda y cantidad ───────────────────────────────── */}
+      <div className="mb-3 space-y-2">
+        {/* Filtro de cantidad de pares */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] flex-shrink-0">
+            Pares
+          </span>
+          <div className="flex rounded-[8px] border border-[var(--border)] overflow-hidden">
+            {STOCK_PRESETS.map(p => (
+              <button
+                key={p.min}
+                onClick={() => setStockMin(p.min)}
+                className={`px-3 py-[5px] text-[11px] font-medium transition-colors whitespace-nowrap ${
+                  stockMin === p.min
+                    ? 'bg-[var(--brand-blue)] text-white'
+                    : 'text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+          {stockMin > 0 && (
+            <span className="text-[10px] text-[var(--text-muted)]">
+              Mostrando SKUs con {stockMin}+ pares en stock
+            </span>
+          )}
+        </div>
+
+        {/* Buscador */}
         <input type="text" placeholder="Buscar por código, referencia, modelo o descripción…"
           value={query} onChange={e => setQuery(e.target.value)}
           className="w-full rounded-[8px] border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
@@ -619,10 +659,11 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
 
       <div className="text-[11px] text-[var(--text-muted)] mb-2">
         {rows.length} de {totalSKUs} SKUs
-        {marcaFilter  ? ` · ${marcaFilter}`       : ''}
-        {modeloFilter ? ` · ${modeloFilter}`      : ''}
-        {curvaFilter  ? ` · Curva ${curvaFilter}` : ''}
-        {query        ? ` · "${query}"`           : ''}
+        {marcaFilter  ? ` · ${marcaFilter}`              : ''}
+        {modeloFilter ? ` · ${modeloFilter}`             : ''}
+        {curvaFilter  ? ` · Curva ${curvaFilter}`        : ''}
+        {stockMin > 0 ? ` · ${stockMin}+ pares`         : ''}
+        {query        ? ` · "${query}"`                  : ''}
       </div>
 
       {/* ── Tabla ─────────────────────────────────────────────────────────── */}
