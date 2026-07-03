@@ -349,7 +349,6 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     return <span className="ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span>
   }
 
-  const NUM_COLS: SortKey[] = ['Saldo Sistema', 'Rotación', 'Valor Venta ($)', 'Valor Total']
   const activeLabel = marcaFilter
     ? modeloFilter ? `${marcaFilter} · ${modeloFilter}` : marcaFilter
     : modeloFilter ? modeloFilter : null
