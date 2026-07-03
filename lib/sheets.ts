@@ -30,6 +30,8 @@ export type SheetName =
   | 'RES_Cartera_Buckets'
   | 'RES_Cartera_Mora'
   | 'RES_Inventario_Linea'
+  | 'RAW_Inventario_Con_Stock'
+  | 'RES_Inventario_Bodegas'
   // Hojas de resúmenes procesados
   | 'RAW_Ventas'
   | 'RAW_Ventas_2025'

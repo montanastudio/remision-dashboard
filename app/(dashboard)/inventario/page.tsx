@@ -28,9 +28,14 @@ export default async function InventarioPage({
   type Row = Record<string, string>
   let inventario: Row[] = []
   let sinRotar: Row[] = []
+  let conStock: Row[] = []
 
   try { inventario = rowsToObjects(await getSheetData('RAW_Inventario')) } catch (e) { console.error('[Inventario] RAW_Inventario:', e) }
   try { sinRotar   = rowsToObjects(await getSheetData('RAW_Sin_Rotar'))  } catch (e) { console.error('[Inventario] RAW_Sin_Rotar:', e)   }
+  try { conStock   = rowsToObjects(await getSheetData('RAW_Inventario_Con_Stock')) } catch (e) { console.error('[Inventario] RAW_Inventario_Con_Stock:', e) }
+
+  // Saldos físicos: usa la hoja nueva con bodegas si existe, si no cae a RAW_Inventario
+  const saldosData = conStock.length > 0 ? conStock : inventario
 
   // ── Sin Rotar ────────────────────────────────────────────────────────
   const totalValor   = inventario.reduce((s, r) => s + parseNum(r['Vr. Existencia ($)']), 0)
@@ -65,8 +70,10 @@ export default async function InventarioPage({
     color: 'var(--brand-blue)',
   }))
 
-  // ── Saldos — usa RAW_Inventario (misma fuente, columna Vr. Existencia ($)) ──
-  const totalSaldosValor = totalValor
+  // ── Saldos — hoja nueva usa 'Valor a Precio Venta ($)', la vieja 'Vr. Existencia ($)' ──
+  const totalSaldosValor = conStock.length > 0
+    ? conStock.reduce((s, r) => s + parseNum(r['Valor a Precio Venta ($)']), 0)
+    : totalValor
 
   return (
     <div className="fade-in-up">
@@ -120,12 +127,12 @@ export default async function InventarioPage({
             <MetricCard
               label="Valor Total Saldos Físicos"
               value={fmt(totalSaldosValor)}
-              sub={`${inventario.length} SKUs en stock`}
+              sub={`${saldosData.length} SKUs en stock`}
             />
           </div>
 
           <Card title="Saldos Físicos" subtitle="stock actual por referencia">
-            <InventarioSaldos saldos={inventario} sinRotar={sinRotar} />
+            <InventarioSaldos saldos={saldosData} sinRotar={sinRotar} />
           </Card>
         </>
       )}

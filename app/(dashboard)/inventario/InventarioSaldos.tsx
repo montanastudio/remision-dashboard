@@ -64,10 +64,19 @@ function extractValorTotal(r: Row): number {
 
 // ── Helpers de columnas renombradas ─────────────────────────────────────────
 function pickModelo(r: Record<string, string | number>): string {
-  return String(r['Modelo'] ?? r['Grupo'] ?? '').trim()
+  return String(r['Modelo'] || r['Grupo'] || '').trim()
 }
 function pickDesc(r: Record<string, string | number>): string {
-  return String(r['Descripción'] ?? r['Producto'] ?? '').trim()
+  return String(r['Descripción'] || r['Producto'] || '').trim()
+}
+
+// ── Parser de Producto: "CALZ.VITEK REF.VTK-6240M-01 YAMAL" → ref + modelo ──
+// La hoja RAW_Inventario_Con_Stock trae Referencia/Modelo vacíos; todo viene
+// en el texto de Producto. Tolera "REF." con o sin espacio y typos (CLAZ.).
+function parseProducto(p: string): { ref: string; modelo: string } {
+  const m = p.toUpperCase().match(/REF\.?\s*([A-Z0-9][A-Z0-9-]*)\s*(.*)$/)
+  if (!m) return { ref: '', modelo: '' }
+  return { ref: m[1], modelo: m[2].trim() }
 }
 
 // ── Detección de curva ────────────────────────────────────────────────────────
@@ -184,10 +193,15 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
 
   // ── Enriquecer filas ───────────────────────────────────────────────────────
   const enriched: EnrichedRow[] = useMemo(() => saldos.map(r => {
-    const ref = (r['Referencia'] ?? '').trim()
+    // Si Referencia/Modelo vienen vacíos (hoja nueva), se extraen de Producto
+    const parsed = parseProducto(pickDesc(r))
+    const ref    = (r['Referencia'] ?? '').trim() || parsed.ref
+    const modelo = pickModelo(r) || parsed.modelo
     const rot = rotMap.get(ref)
     return {
       ...r,
+      Referencia: ref,
+      Modelo:     modelo,
       _marca:        detectarMarca(r),
       _saldo:        extractSaldo(r),
       _precio:       extractPrecio(r),
