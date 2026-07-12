@@ -75,26 +75,33 @@ function parseProducto(p: string): { ref: string; modelo: string } {
   return { ref: m[1], modelo: m[2].trim() }
 }
 
-// ── Detección de curva ────────────────────────────────────────────────────────
-const CURVAS_CONOCIDAS = ['M', 'L', 'Y', 'C'] as const
-const CURVA_COLOR: Record<string, string> = { M: '#3b82f6', L: '#22c55e', Y: '#f59e0b', C: '#a855f7' }
+// ── Detección de curva (B = Baby) ─────────────────────────────────────────────
+const CURVAS_CONOCIDAS = ['M', 'L', 'Y', 'C', 'B'] as const
+const CURVA_COLOR: Record<string, string> = { M: '#3b82f6', L: '#22c55e', Y: '#f59e0b', C: '#a855f7', B: '#ec4899' }
+const CURVA_LABEL: Record<string, string> = { M: 'M', L: 'L', Y: 'Y', C: 'C', B: 'Baby' }
 
 function detectarCurva(r: Row | Record<string, string | number>): string {
   const col = String(r['Curva'] ?? '').trim().toUpperCase()
   if ((CURVAS_CONOCIDAS as readonly string[]).includes(col)) return col
   const desc = pickDesc(r as Row).toUpperCase()
-  const dm = desc.match(/\bCURV[AO]?\.?\s*([MLYC])\b/)
+  const dm = desc.match(/\bCURV[AO]?\.?\s*([MLYCB])\b/)
   if (dm) return dm[1]
   const ref = String(r['Referencia'] ?? '').trim().toUpperCase()
-  const seg = ref.match(/(?:^|[-_])([MLYC])(?:[-_]|$)/)
+  const seg = ref.match(/(?:^|[-_])([MLYCB])(?:[-_]|$)/)
   if (seg) return seg[1]
-  const dig = ref.match(/\d([MLYC])(?:-|$)/)
+  const dig = ref.match(/\d([MLYCB])(?:-|$)/)
   if (dig) return dig[1]
-  const end = ref.match(/[-_ ]([MLYC])$/)
+  const end = ref.match(/[-_ ]([MLYCB])$/)
   if (end) return end[1]
   const last = ref.slice(-1)
   if ((CURVAS_CONOCIDAS as readonly string[]).includes(last)) return last
   return ''
+}
+
+// ── Normalización para búsqueda: minúsculas, sin espacios ni guiones ─────────
+// "6264 C-05", "6264c05" y "6264C-05" encuentran lo mismo
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[\s-]/g, '')
 }
 
 // ── Detección de marca ────────────────────────────────────────────────────────
@@ -144,7 +151,8 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const [stockMax,     setStockMax]     = useState<number | null>(null)
   const [query,        setQuery]        = useState('')
   const [modelSort,    setModelSort]    = useState<ModelSort>('stock')
-  const [expandedRef,  setExpandedRef]  = useState<string | null>(null)
+  const [openBases,    setOpenBases]    = useState<Set<string>>(new Set())
+  const [openRefs,     setOpenRefs]     = useState<Set<string>>(new Set())
   const [sortKey,      setSortKey]      = useState<SortKey>('Valor Total')
   const [sortDir,      setSortDir]      = useState<SortDir>('desc')
   const [legendOpen,   setLegendOpen]   = useState(false)
@@ -252,7 +260,8 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       map[m].qty   += r._saldo
     })
     let list = Object.entries(map).map(([nombre, d]) => ({ nombre, ...d }))
-    if (q) list = list.filter(m => m.nombre.toLowerCase().includes(q))
+    const terms = q.split(/\s+/).filter(Boolean).map(norm)
+    if (terms.length) list = list.filter(m => terms.some(t => norm(m.nombre).includes(t)))
 
     const qtys = list.map(m => m.qty).sort((a, b) => a - b)
     const qq = (p: number) => qtys[Math.floor(p * (qtys.length - 1))] ?? 0
@@ -303,37 +312,6 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     return map
   }, [enriched, modeloFilter, inRango])
 
-  // ── Fichas por referencia base con lista de colores (referencia completa) ──
-  const refGroups = useMemo(() => {
-    if (!modeloFilter) return []
-    const map: Record<string, {
-      base: string; qty: number; valor: number; cedi: number; zf: number
-      items: Record<string, { ref: string; qty: number; cedi: number; zf: number }>
-    }> = {}
-    enriched
-      .filter(r => pickModelo(r) === modeloFilter)
-      .filter(r => !curvaFilter || detectarCurva(r) === curvaFilter)
-      .filter(r => inRango(r._saldo))
-      .forEach(r => {
-        const ref = str(r, 'Referencia') || 'Sin referencia'
-        const m = ref.match(/^(.*?)([MLYC])-(\d+)$/)
-        const base = m ? m[1] : ref
-        if (!map[base]) map[base] = { base, qty: 0, valor: 0, cedi: 0, zf: 0, items: {} }
-        const g = map[base]
-        g.qty   += r._saldo
-        g.valor += r._valorTotal
-        g.cedi  += r._saldoCedi
-        g.zf    += r._saldoZF
-        if (!g.items[ref]) g.items[ref] = { ref, qty: 0, cedi: 0, zf: 0 }
-        g.items[ref].qty  += r._saldo
-        g.items[ref].cedi += r._saldoCedi
-        g.items[ref].zf   += r._saldoZF
-      })
-    return Object.values(map)
-      .map(g => ({ ...g, items: Object.values(g.items).sort((a, b) => a.ref.localeCompare(b.ref)) }))
-      .sort((a, b) => b.qty - a.qty)
-  }, [enriched, modeloFilter, curvaFilter, inRango])
-
   // ── Tabla filtrada y ordenada ──────────────────────────────────────────────
   const rows = useMemo(() => {
     const q = query.toLowerCase().trim()
@@ -342,12 +320,18 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     if (modeloFilter) list = list.filter(r => pickModelo(r) === modeloFilter)
     if (curvaFilter)  list = list.filter(r => detectarCurva(r) === curvaFilter)
     if (rangoActivo)  list = list.filter(r => inRango(r._saldo))
-    if (q) list = list.filter(r =>
-      pickDesc(r).toLowerCase().includes(q)    ||
-      str(r, 'Referencia').toLowerCase().includes(q) ||
-      pickModelo(r).toLowerCase().includes(q)  ||
-      str(r, 'Código').toLowerCase().includes(q)
-    )
+    if (q) {
+      // Multi-término: cada palabra debe coincidir en algún campo (ref, modelo,
+      // descripción, código o marca), normalizando espacios y guiones
+      const terms = q.split(/\s+/).filter(Boolean).map(norm)
+      list = list.filter(r => {
+        const hay = [
+          pickDesc(r), str(r, 'Referencia'), pickModelo(r),
+          str(r, 'Código'), r._marca,
+        ].map(v => norm(String(v)))
+        return terms.every(t => hay.some(h => h.includes(t)))
+      })
+    }
     list.sort((a, b) => {
       let va: string | number, vb: string | number
       switch (sortKey) {
@@ -367,6 +351,70 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     return list
   }, [enriched, marcaFilter, modeloFilter, curvaFilter, rangoActivo, inRango, query, sortKey, sortDir])
 
+  // ── Fichas por referencia+curva (desde rows: heredan TODOS los filtros) ────
+  // Base = referencia sin el sufijo de color: "6264C-01" → "6264C",
+  // "ATH-6011B-03" → "ATH-6011B" (la letra de curva se conserva en la base)
+  const refGroups = useMemo(() => {
+    const map: Record<string, {
+      base: string; curva: string; qty: number; valor: number; cedi: number; zf: number
+      items: Record<string, { ref: string; qty: number; cedi: number; zf: number }>
+    }> = {}
+    rows.forEach(r => {
+      const ref = str(r, 'Referencia') || 'Sin referencia'
+      const m = ref.match(/^(.*)-(\d+)$/)
+      const base = m ? m[1] : ref
+      if (!map[base]) {
+        map[base] = { base, curva: detectarCurva({ Referencia: base }), qty: 0, valor: 0, cedi: 0, zf: 0, items: {} }
+      }
+      const g = map[base]
+      g.qty   += r._saldo
+      g.valor += r._valorTotal
+      g.cedi  += r._saldoCedi
+      g.zf    += r._saldoZF
+      if (!g.items[ref]) g.items[ref] = { ref, qty: 0, cedi: 0, zf: 0 }
+      g.items[ref].qty  += r._saldo
+      g.items[ref].cedi += r._saldoCedi
+      g.items[ref].zf   += r._saldoZF
+    })
+    return Object.values(map)
+      .map(g => ({ ...g, items: Object.values(g.items).sort((a, b) => a.ref.localeCompare(b.ref)) }))
+      .sort((a, b) => a.base.localeCompare(b.base))
+  }, [rows])
+
+  // Visibilidad: con modelo seleccionado se muestran todas; con solo búsqueda
+  // se muestran hasta 12 (más allá, pedir afinar la búsqueda)
+  const FICHAS_MAX_QUERY = 12
+  const showFichas   = refGroups.length > 0 && (modeloFilter !== null || query.trim() !== '')
+  const fichasSobran = !modeloFilter && query.trim() !== '' && refGroups.length > FICHAS_MAX_QUERY
+
+  // Auto-expansión: si la búsqueda reduce a 1 ficha se abre sola;
+  // si además queda 1 solo color, se abre hasta las bodegas
+  useEffect(() => {
+    if (!query.trim()) return
+    if (refGroups.length === 1) {
+      const g = refGroups[0]
+      setOpenBases(new Set([g.base]))
+      if (g.items.length === 1) setOpenRefs(new Set([g.items[0].ref]))
+    }
+  }, [refGroups, query])
+
+  function toggleBase(base: string) {
+    setOpenBases(prev => {
+      const next = new Set(prev)
+      if (next.has(base)) next.delete(base)
+      else next.add(base)
+      return next
+    })
+  }
+  function toggleRef(ref: string) {
+    setOpenRefs(prev => {
+      const next = new Set(prev)
+      if (next.has(ref)) next.delete(ref)
+      else next.add(ref)
+      return next
+    })
+  }
+
   // ── Totales reactivos al filtro (barra sticky) ─────────────────────────────
   const kpiTotals = useMemo(() => {
     const totalUnids = rows.reduce((s, r) => s + r._saldo, 0)
@@ -381,20 +429,25 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const cediPct = kpiTotals.totalUnids > 0 ? (kpiTotals.cediUnids / kpiTotals.totalUnids) * 100 : 0
   const zfPct   = kpiTotals.totalUnids > 0 ? (kpiTotals.zfUnids   / kpiTotals.totalUnids) * 100 : 0
 
+  function resetAcordeones() {
+    setOpenBases(new Set())
+    setOpenRefs(new Set())
+  }
   function handleMarcaClick(name: string) {
     if (marcaFilter === name) { setMarcaFilter(null); setModeloFilter(null) }
     else { setMarcaFilter(name); setModeloFilter(null) }
     setCurvaFilter(null)
-    setExpandedRef(null)
+    resetAcordeones()
   }
   function handleModeloClick(nombre: string) {
     setModeloFilter(prev => prev === nombre ? null : nombre)
     setCurvaFilter(null)
-    setExpandedRef(null)
+    resetAcordeones()
   }
   function clearFilters() {
     setMarcaFilter(null); setModeloFilter(null); setCurvaFilter(null)
-    setStockMin(0); setStockMax(null); setQuery(''); setExpandedRef(null)
+    setStockMin(0); setStockMax(null); setQuery('')
+    resetAcordeones()
   }
 
   const hayFiltros = Boolean(marcaFilter || modeloFilter || curvaFilter || rangoActivo || query)
@@ -423,7 +476,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   }
 
   const tituloTotales = modeloFilter
-    ? `Total ${modeloFilter}${curvaFilter ? ` · curva ${curvaFilter}` : ''}`
+    ? `Total ${modeloFilter}${curvaFilter ? ` · curva ${CURVA_LABEL[curvaFilter] ?? curvaFilter}` : ''}`
     : marcaFilter ? `Total ${marcaFilter}` : 'Inventario total'
 
   return (
@@ -667,7 +720,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                 <button key={c} onClick={() => setCurvaFilter(isActive ? null : c)}
                   className="text-[11px] font-semibold px-3 py-[3px] rounded-full border transition-all leading-none"
                   style={isActive ? { background: color, borderColor: color, color: '#fff' } : { background: color + '18', borderColor: color + '70', color }}>
-                  {c}
+                  {CURVA_LABEL[c] ?? c}
                 </button>
               )
             })}
@@ -691,7 +744,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                     className={`p-3 text-left transition-colors hover:bg-[var(--nav-hover)] ${curvaFilter === c ? 'bg-[var(--nav-hover)]' : ''}`}>
                     <div className="flex items-center gap-1.5 mb-1.5">
                       <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
-                      <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color }}>Curva {c}</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color }}>Curva {CURVA_LABEL[c] ?? c}</span>
                     </div>
                     <div className="text-[18px] font-bold num text-[var(--text)] leading-tight">{fmtN(t.qty)}</div>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -737,87 +790,112 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
           </div>
         )}
 
-        {/* Fichas por referencia — lista de colores con referencia completa */}
-        {modeloFilter && refGroups.length > 0 && (
+        {/* Fichas por referencia+curva — acordeón de 3 niveles */}
+        {showFichas && (
           <div className="mb-4">
             <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
-              {modeloFilter} — por referencia · {refGroups.length}
-              {curvaFilter && <span className="font-normal normal-case"> · curva {curvaFilter}</span>}
+              {modeloFilter ?? `Resultados de "${query.trim()}"`} — por referencia · {refGroups.length}
+              {curvaFilter && <span className="font-normal normal-case"> · curva {CURVA_LABEL[curvaFilter] ?? curvaFilter}</span>}
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-              {refGroups.map(g => (
-                <div key={g.base} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] p-3">
-                  {/* Cabecera: referencia base + total */}
-                  <div className="flex items-baseline justify-between gap-2 pb-2 border-b border-[var(--border)]">
-                    <span className="text-[12px] font-bold text-[var(--text)] num truncate">{g.base}</span>
-                    <span className="text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
-                      {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
-                    </span>
-                  </div>
 
-                  {/* Lista de colores: cantidad izquierda · referencia completa derecha */}
-                  <div className="divide-y divide-[var(--border)]">
-                    {g.items.map(it => {
-                      const isOpen = expandedRef === it.ref
-                      const itCediPct = it.qty > 0 ? (it.cedi / it.qty) * 100 : 0
-                      return (
-                        <div key={it.ref}>
-                          <button
-                            onClick={() => setExpandedRef(isOpen ? null : it.ref)}
-                            className={`w-full flex items-center justify-between gap-2 py-[7px] transition-colors ${isOpen ? '' : 'hover:bg-[var(--nav-hover)]'} rounded-[4px] px-1 -mx-1`}
-                          >
-                            <span className="text-[13px] font-semibold num text-[var(--text)] flex-shrink-0">
-                              {fmtN(it.qty)}
-                              <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und</span>
-                            </span>
-                            <span className="inline-flex items-center gap-1.5 text-[11px] num text-[var(--text-sub)] min-w-0">
-                              <span className="truncate">{it.ref}</span>
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                                className={`flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}>
-                                <polyline points="6 9 12 15 18 9" />
-                              </svg>
-                            </span>
-                          </button>
+            {fichasSobran ? (
+              <div className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] px-4 py-3 text-[11px] text-[var(--text-muted)]">
+                {refGroups.length} referencias coinciden con la búsqueda — escribe más caracteres para afinar
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 items-start">
+                {refGroups.map(g => {
+                  const baseOpen = openBases.has(g.base)
+                  const curvaColor = CURVA_COLOR[g.curva]
+                  return (
+                    <div key={g.base} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
+                      {/* Nivel 1 — cabecera de la ficha */}
+                      <button
+                        onClick={() => toggleBase(g.base)}
+                        aria-expanded={baseOpen}
+                        className="w-full flex items-center gap-2 px-3 py-[10px] hover:bg-[var(--nav-hover)] transition-colors"
+                      >
+                        <span className="text-[13px] font-bold text-[var(--text)] num truncate">{g.base}</span>
+                        {curvaColor && (
+                          <span className="text-[9px] font-semibold px-2 py-[2px] rounded-full text-white flex-shrink-0"
+                            style={{ background: curvaColor }}>
+                            Curva {CURVA_LABEL[g.curva] ?? g.curva}
+                          </span>
+                        )}
+                        <span className="ml-auto text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
+                          {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
+                        </span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                          className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${baseOpen ? 'rotate-180' : ''}`}>
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </button>
 
-                          {/* Desglose por bodega (expandible) */}
-                          {isOpen && (
-                            <div className="pb-2.5 pt-0.5 px-1 fade-in-up">
-                              <div className="flex items-center gap-4 mb-1.5">
-                                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium" style={{ color: BODEGA.cedi.color }}>
-                                  <span className="w-2 h-2 rounded-full" style={{ background: BODEGA.cedi.color }} />
-                                  CEDI <span className="font-bold num">{fmtN(it.cedi)}</span>
-                                </span>
-                                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium" style={{ color: BODEGA.zf.color }}>
-                                  <span className="w-2 h-2 rounded-full" style={{ background: BODEGA.zf.color }} />
-                                  Zona Franca <span className="font-bold num">{fmtN(it.zf)}</span>
-                                </span>
+                      {/* Nivel 2 — colores (referencia izquierda · cantidad derecha) */}
+                      {baseOpen && (
+                        <div className="border-t border-[var(--border)] px-3 pb-2 fade-in-up">
+                          {g.items.map((it, idx) => {
+                            const refOpen = openRefs.has(it.ref)
+                            return (
+                              <div key={it.ref} className={idx < g.items.length - 1 || refOpen ? 'border-b border-[var(--border)]' : ''}>
+                                <button
+                                  onClick={() => toggleRef(it.ref)}
+                                  aria-expanded={refOpen}
+                                  className="w-full flex items-center gap-2 py-[8px] hover:bg-[var(--nav-hover)] transition-colors rounded-[4px] px-1 -mx-1"
+                                >
+                                  <span className="text-[11px] num text-[var(--text-sub)] truncate">{it.ref}</span>
+                                  <span className="ml-auto text-[13px] font-semibold num text-[var(--text)] flex-shrink-0">
+                                    {fmtN(it.qty)}
+                                    <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und</span>
+                                  </span>
+                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                                    className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${refOpen ? 'rotate-180' : ''}`}>
+                                    <polyline points="6 9 12 15 18 9" />
+                                  </svg>
+                                </button>
+
+                                {/* Nivel 3 — listado de bodegas */}
+                                {refOpen && (
+                                  <div className="pb-2.5 pt-0.5 space-y-1 fade-in-up">
+                                    <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
+                                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.cedi.color }} />
+                                      <span className="text-[11px] text-[var(--text-sub)]">Bodega CEDI</span>
+                                      <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.cedi.color }}>
+                                        {fmtN(it.cedi)} und
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
+                                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.zf.color }} />
+                                      <span className="text-[11px] text-[var(--text-sub)]">Zona Franca</span>
+                                      <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.zf.color }}>
+                                        {fmtN(it.zf)} und
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-                              <div className="h-[5px] rounded-full overflow-hidden flex bg-[var(--border)]">
-                                <div className="h-full" style={{ width: `${itCediPct}%`, background: BODEGA.cedi.color }} />
-                                <div className="h-full" style={{ width: `${100 - itCediPct}%`, background: it.qty > 0 ? BODEGA.zf.color : 'transparent' }} />
-                              </div>
+                            )
+                          })}
+
+                          {/* Pie del grupo: split bodegas + valor */}
+                          <div className="flex items-center justify-between pt-2">
+                            <div className="flex items-center gap-2.5">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }} title="Bodega CEDI">
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />{fmtN(g.cedi)}
+                              </span>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }} title="Zona Franca">
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />{fmtN(g.zf)}
+                              </span>
                             </div>
-                          )}
+                            <span className="text-[10px] text-[var(--text-muted)] num">{fmt(g.valor)}</span>
+                          </div>
                         </div>
-                      )
-                    })}
-                  </div>
-
-                  {/* Pie: split bodegas + valor del grupo */}
-                  <div className="flex items-center justify-between pt-2 mt-1 border-t border-[var(--border)]">
-                    <div className="flex items-center gap-2.5">
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }} title="Bodega CEDI">
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />{fmtN(g.cedi)}
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }} title="Zona Franca">
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />{fmtN(g.zf)}
-                      </span>
+                      )}
                     </div>
-                    <span className="text-[10px] text-[var(--text-muted)] num">{fmt(g.valor)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -826,7 +904,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
           {rows.length} de {totalSKUs} SKUs
           {marcaFilter  ? ` · ${marcaFilter}`              : ''}
           {modeloFilter ? ` · ${modeloFilter}`             : ''}
-          {curvaFilter  ? ` · Curva ${curvaFilter}`        : ''}
+          {curvaFilter  ? ` · Curva ${CURVA_LABEL[curvaFilter] ?? curvaFilter}` : ''}
           {rangoActivo   ? ` · ${fmtN(stockMin)}–${fmtN(effStockMax)} pares` : ''}
           {query        ? ` · "${query}"`                  : ''}
         </div>
