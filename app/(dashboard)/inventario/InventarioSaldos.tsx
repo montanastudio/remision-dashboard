@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { fmt, fmtN } from '@/lib/format'
 
 function parseNum(v: unknown): number {
@@ -39,7 +38,6 @@ function extractSaldo(r: Row): number {
 function extractSaldoCedi(r: Row): number {
   const exact = pickCol(r, 'Stock BODEGA CEDI', 'Stock Bodega CEDI', 'Saldo CEDI', 'CEDI')
   if (exact !== '') return parseNum(exact)
-  // búsqueda insensible a mayúsculas si el nombre exacto no coincide
   const key = Object.keys(r).find(k => k.toLowerCase().includes('cedi'))
   return key ? parseNum(r[key]) : 0
 }
@@ -71,8 +69,6 @@ function pickDesc(r: Record<string, string | number>): string {
 }
 
 // ── Parser de Producto: "CALZ.VITEK REF.VTK-6240M-01 YAMAL" → ref + modelo ──
-// La hoja RAW_Inventario_Con_Stock trae Referencia/Modelo vacíos; todo viene
-// en el texto de Producto. Tolera "REF." con o sin espacio y typos (CLAZ.).
 function parseProducto(p: string): { ref: string; modelo: string } {
   const m = p.toUpperCase().match(/REF\.?\s*([A-Z0-9][A-Z0-9-]*)\s*(.*)$/)
   if (!m) return { ref: '', modelo: '' }
@@ -112,7 +108,6 @@ const MARCAS = [
 const MARCA_COLOR = Object.fromEntries(MARCAS.map(m => [m.name, m.color]))
 
 function detectarMarca(r: Row): string {
-  // 1. Columna Marca explícita en el sheet
   const marcaCol = (r['Marca'] ?? '').trim().toUpperCase()
   if (marcaCol) {
     if (marcaCol.includes('ATHLETIC')) return 'Athletic Air'
@@ -120,7 +115,6 @@ function detectarMarca(r: Row): string {
     if (marcaCol.includes('PEGASUS'))  return 'Pegasus'
     if (marcaCol.includes('MARIE') || marcaCol.includes('MARY')) return 'Marie Sophie'
   }
-  // 2. Fallback por descripción y referencia
   const desc = (pickDesc(r)).toUpperCase()
   const ref  = (r['Referencia'] ?? '').toUpperCase()
   const agr  = (r['Agrupación'] ?? '').toUpperCase()
@@ -131,21 +125,14 @@ function detectarMarca(r: Row): string {
   return 'Otros'
 }
 
-// ── Tooltip del gráfico ───────────────────────────────────────────────────────
-function CustomTooltip({ active, payload, label }: { active?: boolean; payload?: { value: number; payload: { skus: number; qty: number } }[]; label?: string }) {
-  if (!active || !payload?.length) return null
-  const d = payload[0]
-  return (
-    <div className="rounded-lg border bg-[var(--card)] border-[var(--border)] shadow-lg px-3 py-2 text-[12px]">
-      <div className="font-semibold text-[var(--text)] mb-1">{label}</div>
-      <div className="text-[var(--text-sub)]">Valor: {fmt(d.value)}</div>
-      <div className="text-[var(--text-muted)]">{fmtN(d.payload.qty)} und · {d.payload.skus} SKUs</div>
-    </div>
-  )
+const BODEGA = {
+  cedi: { label: 'CEDI',        color: '#3b82f6' },
+  zf:   { label: 'Zona Franca', color: '#f59e0b' },
 }
 
 type SortKey = 'Marca' | 'Referencia' | 'Modelo' | 'Descripción' | 'Saldo Sistema' | 'Valor Venta ($)' | 'Valor Total' | 'Rotación'
 type SortDir = 'asc' | 'desc'
+type ModelSort = 'stock' | 'az'
 
 interface Props { saldos: Row[]; sinRotar: Row[] }
 
@@ -154,8 +141,10 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const [modeloFilter, setModeloFilter] = useState<string | null>(null)
   const [curvaFilter,  setCurvaFilter]  = useState<string | null>(null)
   const [stockMin,     setStockMin]     = useState(0)
-  const [stockMax,     setStockMax]     = useState<number | null>(null) // null = sin tope
+  const [stockMax,     setStockMax]     = useState<number | null>(null)
   const [query,        setQuery]        = useState('')
+  const [modelSort,    setModelSort]    = useState<ModelSort>('stock')
+  const [expandedRef,  setExpandedRef]  = useState<string | null>(null)
   const [sortKey,      setSortKey]      = useState<SortKey>('Valor Total')
   const [sortDir,      setSortDir]      = useState<SortDir>('desc')
   const [legendOpen,   setLegendOpen]   = useState(false)
@@ -194,7 +183,6 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
 
   // ── Enriquecer filas ───────────────────────────────────────────────────────
   const enriched: EnrichedRow[] = useMemo(() => saldos.map(r => {
-    // Si Referencia/Modelo vienen vacíos (hoja nueva), se extraen de Producto
     const parsed = parseProducto(pickDesc(r))
     const ref    = (r['Referencia'] ?? '').trim() || parsed.ref
     const modelo = pickModelo(r) || parsed.modelo
@@ -215,31 +203,8 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     }
   }), [saldos, rotMap])
 
-  // ── Totales globales (para chart, no reactivos al filtro) ──────────────────
-  const totalSKUs  = enriched.length
+  const totalSKUs = enriched.length
 
-  // ── Chart por marca ────────────────────────────────────────────────────────
-  const marcaData = useMemo(() => {
-    const map: Record<string, { valor: number; qty: number; skus: number }> = {}
-    enriched.forEach(r => {
-      if (!map[r._marca]) map[r._marca] = { valor: 0, qty: 0, skus: 0 }
-      map[r._marca].valor += r._valorTotal
-      map[r._marca].qty   += r._saldo
-      map[r._marca].skus  += 1
-    })
-    return MARCAS.filter(m => map[m.name]).map(m => ({ name: m.name, valor: map[m.name].valor, qty: map[m.name].qty, skus: map[m.name].skus }))
-  }, [enriched])
-
-  // ── Niveles de stock (quintiles) ───────────────────────────────────────────
-  const NIVELES = [
-    { label: 'Muy bajo',  color: '#3b82f6' },
-    { label: 'Bajo',      color: '#22c55e' },
-    { label: 'Medio',     color: '#f59e0b' },
-    { label: 'Alto',      color: '#f97316' },
-    { label: 'Muy alto',  color: '#ef4444' },
-  ]
-
-  // ── Modelos del filtro de marca activo ─────────────────────────────────────
   // ── Rango de pares (slider) ────────────────────────────────────────────────
   const maxSaldo = useMemo(
     () => enriched.reduce((m, r) => Math.max(m, r._saldo), 0),
@@ -252,7 +217,30 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     [stockMin, effStockMax]
   )
 
+  // ── Totales por marca (para chips del sidebar) ─────────────────────────────
+  const marcaData = useMemo(() => {
+    const map: Record<string, { valor: number; qty: number; skus: number }> = {}
+    enriched.forEach(r => {
+      if (!map[r._marca]) map[r._marca] = { valor: 0, qty: 0, skus: 0 }
+      map[r._marca].valor += r._valorTotal
+      map[r._marca].qty   += r._saldo
+      map[r._marca].skus  += 1
+    })
+    return MARCAS.filter(m => map[m.name]).map(m => ({ name: m.name, ...map[m.name] }))
+  }, [enriched])
+
+  // ── Niveles de stock (quintiles) ───────────────────────────────────────────
+  const NIVELES = [
+    { label: 'Muy bajo',  color: '#3b82f6' },
+    { label: 'Bajo',      color: '#22c55e' },
+    { label: 'Medio',     color: '#f59e0b' },
+    { label: 'Alto',      color: '#f97316' },
+    { label: 'Muy alto',  color: '#ef4444' },
+  ]
+
+  // ── Lista de modelos (navegación principal) ────────────────────────────────
   const modelos = useMemo(() => {
+    const q = query.toLowerCase().trim()
     const base = (marcaFilter ? enriched.filter(r => r._marca === marcaFilter) : enriched)
       .filter(r => inRango(r._saldo))
     const map: Record<string, { valor: number; qty: number }> = {}
@@ -263,19 +251,24 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       map[m].valor += r._valorTotal
       map[m].qty   += r._saldo
     })
-    const list = Object.entries(map).map(([nombre, d]) => ({ nombre, ...d })).sort((a, b) => b.valor - a.valor)
+    let list = Object.entries(map).map(([nombre, d]) => ({ nombre, ...d }))
+    if (q) list = list.filter(m => m.nombre.toLowerCase().includes(q))
+
     const qtys = list.map(m => m.qty).sort((a, b) => a - b)
-    const q = (p: number) => qtys[Math.floor(p * (qtys.length - 1))] ?? 0
-    const cuts = [q(0.2), q(0.4), q(0.6), q(0.8)]
-    return list.map(m => {
+    const qq = (p: number) => qtys[Math.floor(p * (qtys.length - 1))] ?? 0
+    const cuts = [qq(0.2), qq(0.4), qq(0.6), qq(0.8)]
+    const withNivel = list.map(m => {
       let nivel = 0
       if      (m.qty > cuts[3]) nivel = 4
       else if (m.qty > cuts[2]) nivel = 3
       else if (m.qty > cuts[1]) nivel = 2
       else if (m.qty > cuts[0]) nivel = 1
       return { ...m, nivel }
-    }).sort((a, b) => b.nivel - a.nivel || b.valor - a.valor)
-  }, [enriched, marcaFilter, inRango])
+    })
+    return modelSort === 'az'
+      ? withNivel.sort((a, b) => a.nombre.localeCompare(b.nombre))
+      : withNivel.sort((a, b) => b.qty - a.qty)
+  }, [enriched, marcaFilter, inRango, query, modelSort])
 
   const str = (r: EnrichedRow, k: string) => String(r[k] ?? '')
 
@@ -292,51 +285,54 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     const map: Record<string, { qty: number; valor: number; cedi: number; zf: number }> = {
       _total: { qty: 0, valor: 0, cedi: 0, zf: 0 },
     }
-    enriched.filter(r => pickModelo(r) === modeloFilter).forEach(r => {
-      const c = detectarCurva(r) || '_sin_curva'
-      if (!map[c]) map[c] = { qty: 0, valor: 0, cedi: 0, zf: 0 }
-      map[c].qty   += r._saldo
-      map[c].valor += r._valorTotal
-      map[c].cedi  += r._saldoCedi
-      map[c].zf    += r._saldoZF
-      map['_total'].qty   += r._saldo
-      map['_total'].valor += r._valorTotal
-      map['_total'].cedi  += r._saldoCedi
-      map['_total'].zf    += r._saldoZF
-    })
+    enriched
+      .filter(r => pickModelo(r) === modeloFilter)
+      .filter(r => inRango(r._saldo))
+      .forEach(r => {
+        const c = detectarCurva(r) || '_sin_curva'
+        if (!map[c]) map[c] = { qty: 0, valor: 0, cedi: 0, zf: 0 }
+        map[c].qty   += r._saldo
+        map[c].valor += r._valorTotal
+        map[c].cedi  += r._saldoCedi
+        map[c].zf    += r._saldoZF
+        map['_total'].qty   += r._saldo
+        map['_total'].valor += r._valorTotal
+        map['_total'].cedi  += r._saldoCedi
+        map['_total'].zf    += r._saldoZF
+      })
     return map
-  }, [enriched, modeloFilter])
+  }, [enriched, modeloFilter, inRango])
 
-  // ── Fichas por referencia base con desglose por color ─────────────────────
-  // "VTK-6240M-01" → base "VTK-6240" + curva "M" + color "01"
+  // ── Fichas por referencia base con lista de colores (referencia completa) ──
   const refGroups = useMemo(() => {
     if (!modeloFilter) return []
-    const map: Record<string, { base: string; qty: number; valor: number; cedi: number; zf: number; colores: Record<string, number> }> = {}
+    const map: Record<string, {
+      base: string; qty: number; valor: number; cedi: number; zf: number
+      items: Record<string, { ref: string; qty: number; cedi: number; zf: number }>
+    }> = {}
     enriched
       .filter(r => pickModelo(r) === modeloFilter)
       .filter(r => !curvaFilter || detectarCurva(r) === curvaFilter)
+      .filter(r => inRango(r._saldo))
       .forEach(r => {
-        const ref = str(r, 'Referencia')
+        const ref = str(r, 'Referencia') || 'Sin referencia'
         const m = ref.match(/^(.*?)([MLYC])-(\d+)$/)
-        const base  = m ? m[1] : (ref || 'Sin referencia')
-        const color = m ? m[3] : ''
-        if (!map[base]) map[base] = { base, qty: 0, valor: 0, cedi: 0, zf: 0, colores: {} }
+        const base = m ? m[1] : ref
+        if (!map[base]) map[base] = { base, qty: 0, valor: 0, cedi: 0, zf: 0, items: {} }
         const g = map[base]
         g.qty   += r._saldo
         g.valor += r._valorTotal
         g.cedi  += r._saldoCedi
         g.zf    += r._saldoZF
-        if (color) g.colores[color] = (g.colores[color] ?? 0) + r._saldo
+        if (!g.items[ref]) g.items[ref] = { ref, qty: 0, cedi: 0, zf: 0 }
+        g.items[ref].qty  += r._saldo
+        g.items[ref].cedi += r._saldoCedi
+        g.items[ref].zf   += r._saldoZF
       })
     return Object.values(map)
-      .map(g => ({
-        ...g,
-        colores: Object.entries(g.colores)
-          .map(([color, qty]) => ({ color, qty }))
-          .sort((a, b) => a.color.localeCompare(b.color)),
-      }))
+      .map(g => ({ ...g, items: Object.values(g.items).sort((a, b) => a.ref.localeCompare(b.ref)) }))
       .sort((a, b) => b.qty - a.qty)
-  }, [enriched, modeloFilter, curvaFilter])
+  }, [enriched, modeloFilter, curvaFilter, inRango])
 
   // ── Tabla filtrada y ordenada ──────────────────────────────────────────────
   const rows = useMemo(() => {
@@ -371,31 +367,37 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     return list
   }, [enriched, marcaFilter, modeloFilter, curvaFilter, rangoActivo, inRango, query, sortKey, sortDir])
 
-  // ── KPIs reactivos al filtro activo ───────────────────────────────────────
+  // ── Totales reactivos al filtro (barra sticky) ─────────────────────────────
   const kpiTotals = useMemo(() => {
     const totalUnids = rows.reduce((s, r) => s + r._saldo, 0)
     const totalValor = rows.reduce((s, r) => s + r._valorTotal, 0)
     const cediUnids  = rows.reduce((s, r) => s + r._saldoCedi, 0)
     const zfUnids    = rows.reduce((s, r) => s + r._saldoZF, 0)
-    const cediValor  = rows.reduce((s, r) => {
-      const pct = r._saldo > 0 ? r._saldoCedi / r._saldo : 0
-      return s + r._valorTotal * pct
-    }, 0)
-    const zfValor = rows.reduce((s, r) => {
-      const pct = r._saldo > 0 ? r._saldoZF / r._saldo : 0
-      return s + r._valorTotal * pct
-    }, 0)
+    const cediValor  = rows.reduce((s, r) => s + r._valorTotal * (r._saldo > 0 ? r._saldoCedi / r._saldo : 0), 0)
+    const zfValor    = rows.reduce((s, r) => s + r._valorTotal * (r._saldo > 0 ? r._saldoZF   / r._saldo : 0), 0)
     return { totalSKUs: rows.length, totalUnids, totalValor, cediUnids, zfUnids, cediValor, zfValor }
   }, [rows])
+
+  const cediPct = kpiTotals.totalUnids > 0 ? (kpiTotals.cediUnids / kpiTotals.totalUnids) * 100 : 0
+  const zfPct   = kpiTotals.totalUnids > 0 ? (kpiTotals.zfUnids   / kpiTotals.totalUnids) * 100 : 0
 
   function handleMarcaClick(name: string) {
     if (marcaFilter === name) { setMarcaFilter(null); setModeloFilter(null) }
     else { setMarcaFilter(name); setModeloFilter(null) }
+    setCurvaFilter(null)
+    setExpandedRef(null)
   }
   function handleModeloClick(nombre: string) {
     setModeloFilter(prev => prev === nombre ? null : nombre)
     setCurvaFilter(null)
+    setExpandedRef(null)
   }
+  function clearFilters() {
+    setMarcaFilter(null); setModeloFilter(null); setCurvaFilter(null)
+    setStockMin(0); setStockMax(null); setQuery(''); setExpandedRef(null)
+  }
+
+  const hayFiltros = Boolean(marcaFilter || modeloFilter || curvaFilter || rangoActivo || query)
 
   const daysPerEstado = useMemo(() => {
     const map: Record<string, { min: number; max: number; count: number }> = {}
@@ -420,200 +422,64 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     return <span className="ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span>
   }
 
-  const activeLabel = marcaFilter
-    ? modeloFilter ? `${marcaFilter} · ${modeloFilter}` : marcaFilter
-    : modeloFilter ? modeloFilter : null
-
-  // ── Etiqueta de contexto del filtro ───────────────────────────────────────
-  const filterLabel = marcaFilter || modeloFilter || curvaFilter || query
-    ? `Mostrando: ${[marcaFilter, modeloFilter, curvaFilter ? `Curva ${curvaFilter}` : null, query ? `"${query}"` : null].filter(Boolean).join(' · ')}`
-    : 'Todo el inventario'
+  const tituloTotales = modeloFilter
+    ? `Total ${modeloFilter}${curvaFilter ? ` · curva ${curvaFilter}` : ''}`
+    : marcaFilter ? `Total ${marcaFilter}` : 'Inventario total'
 
   return (
-    <div>
-      {/* ── KPI Cards reactivos ──────────────────────────────────────────── */}
-      <div className="mb-5 space-y-2">
-        {/* Fila 1: totales globales */}
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'SKUs en stock',        value: fmtN(kpiTotals.totalSKUs),  sub: `de ${fmtN(totalSKUs)} total` },
-            { label: 'Unidades totales',      value: fmtN(kpiTotals.totalUnids), sub: 'unidades físicas' },
-            { label: 'Valor inventario',      value: fmt(kpiTotals.totalValor),  sub: 'precio venta × saldo' },
-          ].map(c => (
-            <div key={c.label} className="rounded-[10px] bg-[var(--bg)] px-3 py-3">
-              <div className="text-[10px] text-[var(--text-muted)] mb-1">{c.label}</div>
-              <div className="text-[17px] font-bold text-[var(--text)] leading-tight">{c.value}</div>
-              <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{c.sub}</div>
-            </div>
-          ))}
-        </div>
+    <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-5 md:items-start">
 
-        {/* Fila 2: distribución por bodega */}
-        <div className="grid grid-cols-2 gap-3">
-          {/* CEDI */}
-          <div className="rounded-[10px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 flex items-center gap-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#3b82f6] flex-shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#3b82f6] mb-0.5">Bodega CEDI</div>
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-[18px] font-bold text-[var(--text)] num leading-tight">{fmtN(kpiTotals.cediUnids)}</span>
-                <span className="text-[11px] text-[var(--text-muted)]">und</span>
-                <span className="text-[11px] font-semibold text-[var(--text-sub)] num ml-auto">{fmt(kpiTotals.cediValor)}</span>
-              </div>
-              <div className="mt-1.5 h-[3px] rounded-full overflow-hidden bg-[var(--border)]">
-                <div className="h-full rounded-full bg-[#3b82f6] transition-all duration-500"
-                  style={{ width: kpiTotals.totalUnids > 0 ? `${(kpiTotals.cediUnids / kpiTotals.totalUnids) * 100}%` : '0%' }} />
-              </div>
-              <div className="text-[9px] text-[var(--text-muted)] mt-0.5">
-                {kpiTotals.totalUnids > 0 ? Math.round((kpiTotals.cediUnids / kpiTotals.totalUnids) * 100) : 0}% del total
-              </div>
-            </div>
-          </div>
+      {/* ════════ Columna de navegación (sidebar en desktop, bloque inicial en móvil) ════════ */}
+      <aside className="mb-5 md:mb-0 md:sticky md:top-[86px] space-y-4">
 
-          {/* Zona Franca */}
-          <div className="rounded-[10px] border border-[var(--border)] bg-[var(--card)] px-4 py-3 flex items-center gap-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-[#f59e0b] flex-shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#f59e0b] mb-0.5">Zona Franca</div>
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <span className="text-[18px] font-bold text-[var(--text)] num leading-tight">{fmtN(kpiTotals.zfUnids)}</span>
-                <span className="text-[11px] text-[var(--text-muted)]">und</span>
-                <span className="text-[11px] font-semibold text-[var(--text-sub)] num ml-auto">{fmt(kpiTotals.zfValor)}</span>
-              </div>
-              <div className="mt-1.5 h-[3px] rounded-full overflow-hidden bg-[var(--border)]">
-                <div className="h-full rounded-full bg-[#f59e0b] transition-all duration-500"
-                  style={{ width: kpiTotals.totalUnids > 0 ? `${(kpiTotals.zfUnids / kpiTotals.totalUnids) * 100}%` : '0%' }} />
-              </div>
-              <div className="text-[9px] text-[var(--text-muted)] mt-0.5">
-                {kpiTotals.totalUnids > 0 ? Math.round((kpiTotals.zfUnids / kpiTotals.totalUnids) * 100) : 0}% del total
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Buscador */}
+        <input
+          type="text"
+          placeholder="Buscar modelo, referencia…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          className="w-full rounded-[8px] border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
+        />
 
-        {/* Etiqueta de filtro activo */}
-        {(marcaFilter || modeloFilter || curvaFilter || query) && (
-          <div className="text-[10px] text-[var(--brand-blue)] font-medium px-0.5">{filterLabel}</div>
-        )}
-      </div>
-
-      {/* ── Gráfico por marca ─────────────────────────────────────────────── */}
-      <div className="mb-2">
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[11px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)]">
-            Valor por marca
-            {activeLabel && <span className="normal-case font-normal ml-1">· {activeLabel}</span>}
-          </div>
-          {(marcaFilter || modeloFilter) && (
-            <button onClick={() => { setMarcaFilter(null); setModeloFilter(null) }}
-              className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-2">
-              Quitar filtros
-            </button>
-          )}
-        </div>
-        <div style={{ height: 180 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={marcaData} barSize={44}>
-              <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
-              <YAxis hide />
-              <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--nav-hover)' }} />
-              <Bar dataKey="valor" radius={[4, 4, 0, 0]} cursor="pointer"
-                onClick={(data: { name?: string }) => { if (data?.name) handleMarcaClick(data.name) }}>
-                {marcaData.map(d => (
-                  <Cell key={d.name} fill={MARCA_COLOR[d.name] ?? '#94a3b8'}
-                    opacity={marcaFilter && marcaFilter !== d.name ? 0.22 : 1} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* ── Chips de modelos ──────────────────────────────────────────────── */}
-      {modelos.length > 0 && (
-        <div className="mb-5">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-              Modelos · {modelos.length}
-              {marcaFilter && <span className="font-normal normal-case"> en {marcaFilter}</span>}
-            </div>
-            <div ref={legendRef} className="relative">
-              <button onClick={() => setLegendOpen(o => !o)}
-                className="w-[18px] h-[18px] rounded-full border border-[var(--border)] text-[10px] font-bold text-[var(--text-muted)] hover:border-[var(--text-sub)] hover:text-[var(--text)] transition-colors flex items-center justify-center leading-none"
-                title="Clasificación de colores">
-                ?
-              </button>
-              {legendOpen && (
-                <div className="absolute right-0 top-full mt-2 w-[220px] bg-[var(--card)] border border-[var(--border)] rounded-[12px] shadow-lg p-3 z-30">
-                  <div className="text-[11px] font-semibold text-[var(--text)] mb-2">Nivel de stock por modelo</div>
-                  <p className="text-[10px] text-[var(--text-muted)] mb-3 leading-relaxed">Calculado por quintiles sobre las unidades en stock de los modelos visibles.</p>
-                  <div className="space-y-1.5">
-                    {NIVELES.map((n, i) => (
-                      <div key={n.label} className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: n.color }} />
-                        <span className="text-[11px] text-[var(--text-sub)] flex-1">{n.label}</span>
-                        <span className="text-[10px] text-[var(--text-muted)]">quintil {i + 1}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="text-[10px] text-[var(--text-muted)] mt-3 leading-relaxed border-t border-[var(--border)] pt-2">El color cambia al filtrar por marca o modelo.</p>
-                </div>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-1.5 max-h-[90px] overflow-y-auto">
-            {modelos.map(m => {
-              const isActive = modeloFilter === m.nombre
-              const color = NIVELES[m.nivel]?.color ?? '#64748b'
+        {/* Marcas */}
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-1.5">Marcas</div>
+          <div className="flex flex-wrap gap-1.5">
+            {marcaData.map(m => {
+              const isActive = marcaFilter === m.name
+              const color = MARCA_COLOR[m.name] ?? '#94a3b8'
               return (
-                <button key={m.nombre} onClick={() => handleModeloClick(m.nombre)}
-                  title={`${fmtN(m.qty)} und · ${fmt(m.valor)} · ${NIVELES[m.nivel]?.label}`}
-                  className="rounded-full px-2.5 py-[3px] text-[11px] font-medium transition-all border leading-none"
+                <button
+                  key={m.name}
+                  onClick={() => handleMarcaClick(m.name)}
+                  title={`${fmtN(m.qty)} und · ${fmt(m.valor)} · ${m.skus} SKUs`}
+                  className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-[4px] text-[11px] font-medium transition-all leading-none"
                   style={isActive
                     ? { background: color, borderColor: color, color: '#fff' }
-                    : { background: color + '18', borderColor: color + '70', color }}>
-                  {m.nombre}
+                    : { background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text-sub)' }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: isActive ? '#fff' : color }} />
+                  {m.name}
                 </button>
               )
             })}
           </div>
         </div>
-      )}
 
-      {/* ── Chips de curva ────────────────────────────────────────────────── */}
-      {modeloFilter && curvasDelModelo.length > 0 && (
-        <div className="flex items-center gap-2 mb-4 flex-wrap">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] flex-shrink-0">Curva</span>
-          <button onClick={() => setCurvaFilter(null)}
-            className={`text-[11px] font-medium px-3 py-[3px] rounded-full border transition-all leading-none ${
-              !curvaFilter ? 'bg-[var(--text-sub)] border-[var(--text-sub)] text-[var(--card)]' : 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--nav-hover)]'
-            }`}>
-            Todas
-          </button>
-          {curvasDelModelo.map(c => {
-            const isActive = curvaFilter === c
-            const color = CURVA_COLOR[c] ?? '#94a3b8'
-            return (
-              <button key={c} onClick={() => setCurvaFilter(isActive ? null : c)}
-                className="text-[11px] font-semibold px-3 py-[3px] rounded-full border transition-all leading-none"
-                style={isActive ? { background: color, borderColor: color, color: '#fff' } : { background: color + '18', borderColor: color + '70', color }}>
-                {c}
+        {/* Rango de pares */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Pares</span>
+            {rangoActivo && (
+              <button
+                onClick={() => { setStockMin(0); setStockMax(null) }}
+                className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-2"
+              >
+                Restablecer
               </button>
-            )
-          })}
-        </div>
-      )}
-
-      {/* ── Filtros de búsqueda y cantidad ───────────────────────────────── */}
-      <div className="mb-3 space-y-2">
-        {/* Filtro de rango de pares (slider doble) */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] flex-shrink-0">
-            Pares
-          </span>
-
-          {/* Slider */}
-          <div className="relative w-[240px] h-5 flex-shrink-0">
+            )}
+          </div>
+          <div className="relative h-5 mb-1.5">
             <div className="absolute top-1/2 -translate-y-1/2 h-[4px] w-full rounded-full bg-[var(--border)]" />
             {maxSaldo > 0 && (
               <div
@@ -638,320 +504,484 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
               className="dual-range absolute inset-0 w-full h-full m-0"
             />
           </div>
-
-          {/* Inputs numéricos para definir el rango exacto */}
           <div className="flex items-center gap-1.5">
             <input
               type="number" min={0} max={effStockMax} value={stockMin}
               onChange={e => setStockMin(Math.max(0, Math.min(Number(e.target.value) || 0, effStockMax)))}
-              className="w-[64px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] px-2 py-[4px] text-[11px] num text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
+              className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg)] px-2 py-[4px] text-[11px] num text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
             />
-            <span className="text-[10px] text-[var(--text-muted)]">a</span>
+            <span className="text-[10px] text-[var(--text-muted)] flex-shrink-0">a</span>
             <input
               type="number" min={stockMin} value={effStockMax}
               onChange={e => {
                 const v = Number(e.target.value) || 0
                 setStockMax(v >= maxSaldo ? null : Math.max(v, stockMin))
               }}
-              className="w-[64px] rounded-[6px] border border-[var(--border)] bg-[var(--bg)] px-2 py-[4px] text-[11px] num text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
+              className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg)] px-2 py-[4px] text-[11px] num text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
             />
-            <span className="text-[10px] text-[var(--text-muted)]">pares</span>
           </div>
-
-          {rangoActivo && (
-            <button
-              onClick={() => { setStockMin(0); setStockMax(null) }}
-              className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-2"
-            >
-              Restablecer
-            </button>
-          )}
         </div>
 
-        {/* Buscador */}
-        <input type="text" placeholder="Buscar por código, referencia, modelo o descripción…"
-          value={query} onChange={e => setQuery(e.target.value)}
-          className="w-full rounded-[8px] border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-[12px] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
-        />
-      </div>
-
-      {/* ── Resumen del modelo seleccionado con bodega ────────────────────── */}
-      {modeloFilter && curvasDelModelo.length > 0 && (
-        <div className="mb-3 rounded-[10px] border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
-          <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-            {modeloFilter} — resumen de stock
+        {/* Lista de modelos */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+              Modelos · {modelos.length}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setModelSort(s => s === 'stock' ? 'az' : 'stock')}
+                className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] px-1.5 py-0.5 rounded border border-[var(--border)] leading-none"
+                title="Cambiar orden"
+              >
+                {modelSort === 'stock' ? '↓ stock' : 'A–Z'}
+              </button>
+              <div ref={legendRef} className="relative">
+                <button
+                  onClick={() => setLegendOpen(o => !o)}
+                  className="w-[16px] h-[16px] rounded-full border border-[var(--border)] text-[9px] font-bold text-[var(--text-muted)] hover:border-[var(--text-sub)] hover:text-[var(--text)] transition-colors flex items-center justify-center leading-none"
+                  title="Clasificación de colores"
+                >
+                  ?
+                </button>
+                {legendOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-[210px] bg-[var(--card)] border border-[var(--border)] rounded-[12px] shadow-lg p-3 z-30">
+                    <div className="text-[11px] font-semibold text-[var(--text)] mb-2">Nivel de stock</div>
+                    <div className="space-y-1.5">
+                      {NIVELES.map((n, i) => (
+                        <div key={n.label} className="flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: n.color }} />
+                          <span className="text-[11px] text-[var(--text-sub)] flex-1">{n.label}</span>
+                          <span className="text-[10px] text-[var(--text-muted)]">quintil {i + 1}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="grid divide-x divide-[var(--border)]"
-            style={{ gridTemplateColumns: `repeat(${curvasDelModelo.length + 1}, 1fr)` }}>
-            {curvasDelModelo.map(c => {
-              const color = CURVA_COLOR[c] ?? '#94a3b8'
-              const t = totalsPorCurva[c] ?? { qty: 0, valor: 0, cedi: 0, zf: 0 }
-              const pct = totalsPorCurva['_total']?.qty ? Math.round((t.qty / totalsPorCurva['_total'].qty) * 100) : 0
+
+          <div className="max-h-[190px] md:max-h-[46vh] overflow-y-auto rounded-[10px] border border-[var(--border)] bg-[var(--bg)] p-1">
+            {modelos.map(m => {
+              const isActive = modeloFilter === m.nombre
+              const color = NIVELES[m.nivel]?.color ?? '#64748b'
               return (
-                <button key={c} onClick={() => setCurvaFilter(curvaFilter === c ? null : c)}
-                  className={`p-3 text-left transition-colors hover:bg-[var(--nav-hover)] ${curvaFilter === c ? 'bg-[var(--nav-hover)]' : ''}`}>
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
-                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color }}>Curva {c}</span>
-                  </div>
-                  <div className="text-[18px] font-bold num text-[var(--text)] leading-tight">{fmtN(t.qty)}</div>
-                  {/* Desglose por bodega */}
-                  <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#3b82f6]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />
-                      {fmtN(t.cedi)}
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#f59e0b]">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />
-                      {fmtN(t.zf)}
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{fmt(t.valor)}</div>
-                  <div className="mt-1.5 h-[3px] bg-[var(--border)] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
-                  </div>
-                  <div className="text-[9px] text-[var(--text-muted)] mt-0.5">{pct}% del modelo</div>
+                <button
+                  key={m.nombre}
+                  onClick={() => handleModeloClick(m.nombre)}
+                  title={`${fmtN(m.qty)} und · ${fmt(m.valor)}`}
+                  className={`w-full flex items-center gap-2 px-2 py-[5px] rounded-[7px] text-left transition-colors ${
+                    isActive ? 'bg-[var(--brand-blue)]' : 'hover:bg-[var(--nav-hover)]'
+                  }`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: isActive ? '#fff' : color }} />
+                  <span className={`text-[12px] font-medium truncate flex-1 ${isActive ? 'text-white' : 'text-[var(--text)]'}`}>
+                    {m.nombre}
+                  </span>
+                  <span className={`text-[11px] num flex-shrink-0 ${isActive ? 'text-white/80' : 'text-[var(--text-muted)]'}`}>
+                    {fmtN(m.qty)}
+                  </span>
                 </button>
               )
             })}
-            {/* Card TOTAL */}
-            <div className="p-3">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Total</div>
-              <div className="text-[18px] font-bold num text-[var(--text)] leading-tight">
-                {fmtN(totalsPorCurva['_total']?.qty ?? 0)}
+            {modelos.length === 0 && (
+              <div className="py-4 text-center text-[11px] text-[var(--text-muted)]">Sin modelos</div>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      {/* ════════ Contenido principal ════════ */}
+      <div className="min-w-0">
+
+        {/* Barra de totales — sticky */}
+        <div className="sticky top-[62px] md:top-[74px] z-10 mb-4 rounded-[10px] border border-[var(--border)] bg-[var(--card)] shadow-card px-4 py-3">
+          <div className="flex items-center gap-4 md:gap-6 flex-wrap">
+            <div>
+              <div className="text-[10px] text-[var(--text-muted)] leading-tight">{tituloTotales}</div>
+              <div className="text-[20px] font-bold num text-[var(--text)] leading-tight">
+                {fmtN(kpiTotals.totalUnids)}
+                <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und · {fmtN(kpiTotals.totalSKUs)} SKUs</span>
               </div>
-              {/* Bodega TOTAL */}
-              <div className="flex items-center gap-2 mt-1 flex-wrap">
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#3b82f6]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />
-                  CEDI {fmtN(totalsPorCurva['_total']?.cedi ?? 0)}
-                </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#f59e0b]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />
-                  ZF {fmtN(totalsPorCurva['_total']?.zf ?? 0)}
-                </span>
+              <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.totalValor)}</div>
+            </div>
+
+            <div>
+              <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.cedi.color }}>
+                <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.cedi.color }} />
+                CEDI
               </div>
-              <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                {fmt(totalsPorCurva['_total']?.valor ?? 0)}
+              <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.cedi.color }}>
+                {fmtN(kpiTotals.cediUnids)}
+                <span className="text-[10px] font-normal ml-1">· {Math.round(cediPct)}%</span>
               </div>
-              <div className="mt-1.5 h-[3px] bg-[var(--brand-blue)] rounded-full opacity-30" />
-              <div className="text-[9px] text-[var(--text-muted)] mt-0.5">{curvasDelModelo.length} curvas</div>
+              <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.cediValor)}</div>
+            </div>
+
+            <div>
+              <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.zf.color }}>
+                <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.zf.color }} />
+                Zona Franca
+              </div>
+              <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.zf.color }}>
+                {fmtN(kpiTotals.zfUnids)}
+                <span className="text-[10px] font-normal ml-1">· {Math.round(zfPct)}%</span>
+              </div>
+              <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.zfValor)}</div>
+            </div>
+
+            <div className="flex-1 min-w-[110px]">
+              <div className="h-[6px] rounded-full overflow-hidden flex bg-[var(--border)]">
+                <div className="h-full transition-all duration-500" style={{ width: `${cediPct}%`, background: BODEGA.cedi.color }} />
+                <div className="h-full transition-all duration-500" style={{ width: `${zfPct}%`,   background: BODEGA.zf.color }} />
+              </div>
+              {hayFiltros && (
+                <button
+                  onClick={clearFilters}
+                  className="mt-1.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-2"
+                >
+                  Quitar filtros
+                </button>
+              )}
             </div>
           </div>
         </div>
-      )}
 
-      {/* ── Fichas por referencia base con desglose por color ─────────────── */}
-      {modeloFilter && refGroups.length > 0 && (
-        <div className="mb-4">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
-            {modeloFilter} — por referencia · {refGroups.length}
-            {curvaFilter && <span className="font-normal normal-case"> · curva {curvaFilter}</span>}
+        {/* Chips de curva */}
+        {modeloFilter && curvasDelModelo.length > 0 && (
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] flex-shrink-0">Curva</span>
+            <button
+              onClick={() => setCurvaFilter(null)}
+              className={`text-[11px] font-medium px-3 py-[3px] rounded-full border transition-all leading-none ${
+                !curvaFilter ? 'bg-[var(--text-sub)] border-[var(--text-sub)] text-[var(--card)]' : 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--nav-hover)]'
+              }`}
+            >
+              Todas
+            </button>
+            {curvasDelModelo.map(c => {
+              const isActive = curvaFilter === c
+              const color = CURVA_COLOR[c] ?? '#94a3b8'
+              return (
+                <button key={c} onClick={() => setCurvaFilter(isActive ? null : c)}
+                  className="text-[11px] font-semibold px-3 py-[3px] rounded-full border transition-all leading-none"
+                  style={isActive ? { background: color, borderColor: color, color: '#fff' } : { background: color + '18', borderColor: color + '70', color }}>
+                  {c}
+                </button>
+              )
+            })}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {refGroups.map(g => (
-              <div key={g.base} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] p-3">
-                {/* Referencia base + total */}
-                <div className="flex items-baseline justify-between mb-2 gap-2">
-                  <span className="text-[12px] font-bold text-[var(--text)] num truncate">{g.base}</span>
-                  <span className="text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
-                    {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
+        )}
+
+        {/* Resumen por curva */}
+        {modeloFilter && curvasDelModelo.length > 0 && (
+          <div className="mb-4 rounded-[10px] border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
+            <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+              {modeloFilter} — resumen de stock
+            </div>
+            <div className="grid divide-x divide-[var(--border)]"
+              style={{ gridTemplateColumns: `repeat(${curvasDelModelo.length + 1}, 1fr)` }}>
+              {curvasDelModelo.map(c => {
+                const color = CURVA_COLOR[c] ?? '#94a3b8'
+                const t = totalsPorCurva[c] ?? { qty: 0, valor: 0, cedi: 0, zf: 0 }
+                const pct = totalsPorCurva['_total']?.qty ? Math.round((t.qty / totalsPorCurva['_total'].qty) * 100) : 0
+                return (
+                  <button key={c} onClick={() => setCurvaFilter(curvaFilter === c ? null : c)}
+                    className={`p-3 text-left transition-colors hover:bg-[var(--nav-hover)] ${curvaFilter === c ? 'bg-[var(--nav-hover)]' : ''}`}>
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+                      <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color }}>Curva {c}</span>
+                    </div>
+                    <div className="text-[18px] font-bold num text-[var(--text)] leading-tight">{fmtN(t.qty)}</div>
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />
+                        {fmtN(t.cedi)}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }}>
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />
+                        {fmtN(t.zf)}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{fmt(t.valor)}</div>
+                    <div className="mt-1.5 h-[3px] bg-[var(--border)] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+                    </div>
+                    <div className="text-[9px] text-[var(--text-muted)] mt-0.5">{pct}% del modelo</div>
+                  </button>
+                )
+              })}
+              <div className="p-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Total</div>
+                <div className="text-[18px] font-bold num text-[var(--text)] leading-tight">
+                  {fmtN(totalsPorCurva['_total']?.qty ?? 0)}
+                </div>
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />
+                    {fmtN(totalsPorCurva['_total']?.cedi ?? 0)}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }}>
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />
+                    {fmtN(totalsPorCurva['_total']?.zf ?? 0)}
                   </span>
                 </div>
-
-                {/* Desglose por color */}
-                {g.colores.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mb-2">
-                    {g.colores.map(c => (
-                      <span key={c.color}
-                        className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--card)] px-2 py-[2px] text-[10px] leading-none">
-                        <span className="text-[var(--text-muted)]">Color {c.color}</span>
-                        <span className="font-semibold text-[var(--text)] num">{fmtN(c.qty)}</span>
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Bodegas + valor */}
-                <div className="flex items-center justify-between pt-1.5 border-t border-[var(--border)]">
-                  <div className="flex items-center gap-2.5">
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#3b82f6]" title="Bodega CEDI">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#3b82f6]" />{fmtN(g.cedi)}
-                    </span>
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-[#f59e0b]" title="Zona Franca">
-                      <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]" />{fmtN(g.zf)}
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-[var(--text-muted)] num">{fmt(g.valor)}</span>
+                <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                  {fmt(totalsPorCurva['_total']?.valor ?? 0)}
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="text-[11px] text-[var(--text-muted)] mb-2">
-        {rows.length} de {totalSKUs} SKUs
-        {marcaFilter  ? ` · ${marcaFilter}`              : ''}
-        {modeloFilter ? ` · ${modeloFilter}`             : ''}
-        {curvaFilter  ? ` · Curva ${curvaFilter}`        : ''}
-        {rangoActivo   ? ` · ${fmtN(stockMin)}–${fmtN(effStockMax)} pares` : ''}
-        {query        ? ` · "${query}"`                  : ''}
-      </div>
-
-      {/* ── Tabla ─────────────────────────────────────────────────────────── */}
-      <div className="table-scroll" style={{ maxHeight: 420 }}>
-        <table className="w-full border-collapse text-[12px]">
-          <thead className="sticky top-0 bg-[var(--card)] z-10">
-            <tr>
-              {([
-                { key: 'Marca',       label: 'Marca' },
-                { key: 'Referencia',  label: 'Referencia' },
-                { key: 'Modelo',      label: 'Modelo' },
-                { key: 'Descripción', label: 'Descripción' },
-              ] as { key: SortKey; label: string }[]).map(col => (
-                <th key={col.key} onClick={() => toggleSort(col.key)}
-                  className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-left">
-                  {col.label}<SortIcon k={col.key} />
-                </th>
-              ))}
-
-              {/* Stock con sub-header de bodegas */}
-              <th onClick={() => toggleSort('Saldo Sistema')}
-                className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-right">
-                Stock<SortIcon k="Saldo Sistema" />
-                <div className="flex items-center justify-end gap-2 mt-0.5 font-normal normal-case tracking-normal">
-                  <span className="text-[#3b82f6]">CEDI</span>
-                  <span className="text-[#f59e0b]">ZF</span>
-                </div>
-              </th>
-
-              {/* Rotación */}
-              <th className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] text-right whitespace-nowrap">
-                <div className="flex items-center justify-end gap-1.5">
-                  <button onClick={() => toggleSort('Rotación')} className="cursor-pointer select-none hover:text-[var(--text)]">
-                    Rotación<SortIcon k="Rotación" />
-                  </button>
-                  <div ref={rotRef}>
-                    <button onClick={openRotPopup}
-                      className="w-[15px] h-[15px] rounded-full border border-[var(--border)] text-[9px] font-bold text-[var(--text-muted)] hover:border-[var(--text-sub)] hover:text-[var(--text)] transition-colors flex items-center justify-center leading-none flex-shrink-0">
-                      ?
-                    </button>
-                  </div>
-                </div>
-              </th>
-
-              {([
-                { key: 'Valor Venta ($)', label: 'Valor Unit.' },
-                { key: 'Valor Total',     label: 'Valor Total' },
-              ] as { key: SortKey; label: string }[]).map(col => (
-                <th key={col.key} onClick={() => toggleSort(col.key)}
-                  className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-right">
-                  {col.label}<SortIcon k={col.key} />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => {
-              const marca = String(r._marca)
-              const color = MARCA_COLOR[marca] ?? '#94a3b8'
-              return (
-                <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
-                  <td className="px-[10px] py-[9px]">
-                    <button onClick={() => handleMarcaClick(marca)} className="flex items-center gap-1.5 group">
-                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
-                      <span className="text-[11px] text-[var(--text-muted)] group-hover:text-[var(--text)] transition-colors">{marca}</span>
-                    </button>
-                  </td>
-                  <td className="px-[10px] py-[9px] text-[var(--text-sub)] num text-[11px]">{str(r, 'Referencia')}</td>
-                  <td className="px-[10px] py-[9px]">
-                    <button onClick={() => handleModeloClick(pickModelo(r))} className="font-medium text-[var(--text)] hover:underline text-left">
-                      {pickModelo(r)}
-                    </button>
-                  </td>
-                  <td className="px-[10px] py-[9px] text-[var(--text-sub)] max-w-[200px] truncate">{pickDesc(r)}</td>
-
-                  {/* Stock con split bodega */}
-                  <td className="px-[10px] py-[9px] text-right">
-                    <div className="text-[11px] font-semibold text-[var(--text)] num">{fmtN(r._saldo)}</div>
-                    {(r._saldoCedi > 0 || r._saldoZF > 0) && (
-                      <div className="flex items-center justify-end gap-2 mt-0.5">
-                        <span className="text-[9px] text-[#3b82f6] num">{fmtN(r._saldoCedi)}</span>
-                        <span className="text-[9px] text-[#f59e0b] num">{fmtN(r._saldoZF)}</span>
-                      </div>
-                    )}
-                  </td>
-
-                  <td className="px-[10px] py-[9px] text-right">
-                    {r._rotEstado === 'Activo' ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#22c55e]">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />Activo
-                      </span>
-                    ) : (
-                      <span className={`inline-block text-[11px] font-semibold tabular-nums ${
-                        r._rotEstado === 'CRITICO' ? 'text-[#ef4444]' :
-                        r._rotEstado === 'ALTO'    ? 'text-[#f97316]' :
-                        r._rotEstado === 'MEDIO'   ? 'text-[#f59e0b]' : 'text-[var(--text-sub)]'
-                      }`}>
-                        {fmtN(r._dias)} días
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-[10px] py-[9px] text-right num text-[11px] text-[var(--text-sub)]">{fmt(r._precio)}</td>
-                  <td className="px-[10px] py-[9px] text-right num text-[11px]">
-                    <span className="font-semibold text-[var(--text)]">{fmt(r._valorTotal)}</span>
-                  </td>
-                </tr>
-              )
-            })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-[12px] text-[var(--text-muted)]">Sin resultados</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Popup rotación */}
-      {rotPopup && rotPopupPos && (
-        <div ref={rotRef}
-          style={{ position: 'fixed', top: rotPopupPos.top, right: rotPopupPos.right, zIndex: 9999 }}
-          className="w-[260px] bg-[var(--card)] border border-[var(--border)] rounded-[12px] shadow-lg p-4">
-          <div className="text-[12px] font-semibold text-[var(--text)] mb-1">Clasificación de rotación</div>
-          <p className="text-[10px] text-[var(--text-muted)] mb-3 leading-relaxed">
-            Basada en los días transcurridos desde la última venta registrada del producto.
-          </p>
-          <div className="space-y-2.5">
-            <div className="flex items-start gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#22c55e] mt-[3px] flex-shrink-0" />
-              <div>
-                <div className="text-[11px] font-semibold text-[#22c55e]">Activo</div>
-                <div className="text-[10px] text-[var(--text-muted)] leading-relaxed mt-0.5">Producto con ventas recientes.</div>
+                <div className="mt-1.5 h-[3px] bg-[var(--brand-blue)] rounded-full opacity-30" />
+                <div className="text-[9px] text-[var(--text-muted)] mt-0.5">{curvasDelModelo.length} curvas</div>
               </div>
             </div>
-            {([
-              { estado: 'MEDIO',   color: '#f59e0b', label: 'Medio'   },
-              { estado: 'ALTO',    color: '#f97316', label: 'Alto'    },
-              { estado: 'CRITICO', color: '#ef4444', label: 'Crítico' },
-            ] as { estado: string; color: string; label: string }[]).map(({ estado, color, label }) => {
-              const d = daysPerEstado[estado]
-              return (
-                <div key={estado} className="flex items-start gap-2">
-                  <span className="w-2 h-2 rounded-full mt-[3px] flex-shrink-0" style={{ background: color }} />
-                  <div>
-                    <div className="text-[11px] font-semibold" style={{ color }}>{label}</div>
-                    <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
-                      {d ? d.min === d.max ? `${d.min} días · ${d.count} SKUs` : `${d.min}–${d.max} días · ${d.count} SKUs` : 'Sin datos'}
+          </div>
+        )}
+
+        {/* Fichas por referencia — lista de colores con referencia completa */}
+        {modeloFilter && refGroups.length > 0 && (
+          <div className="mb-4">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-2">
+              {modeloFilter} — por referencia · {refGroups.length}
+              {curvaFilter && <span className="font-normal normal-case"> · curva {curvaFilter}</span>}
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+              {refGroups.map(g => (
+                <div key={g.base} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] p-3">
+                  {/* Cabecera: referencia base + total */}
+                  <div className="flex items-baseline justify-between gap-2 pb-2 border-b border-[var(--border)]">
+                    <span className="text-[12px] font-bold text-[var(--text)] num truncate">{g.base}</span>
+                    <span className="text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
+                      {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
+                    </span>
+                  </div>
+
+                  {/* Lista de colores: cantidad izquierda · referencia completa derecha */}
+                  <div className="divide-y divide-[var(--border)]">
+                    {g.items.map(it => {
+                      const isOpen = expandedRef === it.ref
+                      const itCediPct = it.qty > 0 ? (it.cedi / it.qty) * 100 : 0
+                      return (
+                        <div key={it.ref}>
+                          <button
+                            onClick={() => setExpandedRef(isOpen ? null : it.ref)}
+                            className={`w-full flex items-center justify-between gap-2 py-[7px] transition-colors ${isOpen ? '' : 'hover:bg-[var(--nav-hover)]'} rounded-[4px] px-1 -mx-1`}
+                          >
+                            <span className="text-[13px] font-semibold num text-[var(--text)] flex-shrink-0">
+                              {fmtN(it.qty)}
+                              <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und</span>
+                            </span>
+                            <span className="inline-flex items-center gap-1.5 text-[11px] num text-[var(--text-sub)] min-w-0">
+                              <span className="truncate">{it.ref}</span>
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                                className={`flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}>
+                                <polyline points="6 9 12 15 18 9" />
+                              </svg>
+                            </span>
+                          </button>
+
+                          {/* Desglose por bodega (expandible) */}
+                          {isOpen && (
+                            <div className="pb-2.5 pt-0.5 px-1 fade-in-up">
+                              <div className="flex items-center gap-4 mb-1.5">
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium" style={{ color: BODEGA.cedi.color }}>
+                                  <span className="w-2 h-2 rounded-full" style={{ background: BODEGA.cedi.color }} />
+                                  CEDI <span className="font-bold num">{fmtN(it.cedi)}</span>
+                                </span>
+                                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium" style={{ color: BODEGA.zf.color }}>
+                                  <span className="w-2 h-2 rounded-full" style={{ background: BODEGA.zf.color }} />
+                                  Zona Franca <span className="font-bold num">{fmtN(it.zf)}</span>
+                                </span>
+                              </div>
+                              <div className="h-[5px] rounded-full overflow-hidden flex bg-[var(--border)]">
+                                <div className="h-full" style={{ width: `${itCediPct}%`, background: BODEGA.cedi.color }} />
+                                <div className="h-full" style={{ width: `${100 - itCediPct}%`, background: it.qty > 0 ? BODEGA.zf.color : 'transparent' }} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Pie: split bodegas + valor del grupo */}
+                  <div className="flex items-center justify-between pt-2 mt-1 border-t border-[var(--border)]">
+                    <div className="flex items-center gap-2.5">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }} title="Bodega CEDI">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />{fmtN(g.cedi)}
+                      </span>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }} title="Zona Franca">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />{fmtN(g.zf)}
+                      </span>
                     </div>
+                    <span className="text-[10px] text-[var(--text-muted)] num">{fmt(g.valor)}</span>
                   </div>
                 </div>
-              )
-            })}
+              ))}
+            </div>
           </div>
+        )}
+
+        {/* Contador */}
+        <div className="text-[11px] text-[var(--text-muted)] mb-2">
+          {rows.length} de {totalSKUs} SKUs
+          {marcaFilter  ? ` · ${marcaFilter}`              : ''}
+          {modeloFilter ? ` · ${modeloFilter}`             : ''}
+          {curvaFilter  ? ` · Curva ${curvaFilter}`        : ''}
+          {rangoActivo   ? ` · ${fmtN(stockMin)}–${fmtN(effStockMax)} pares` : ''}
+          {query        ? ` · "${query}"`                  : ''}
         </div>
-      )}
+
+        {/* Tabla de detalle */}
+        <div className="table-scroll" style={{ maxHeight: 420 }}>
+          <table className="w-full border-collapse text-[12px]">
+            <thead className="sticky top-0 bg-[var(--card)] z-10">
+              <tr>
+                {([
+                  { key: 'Marca',       label: 'Marca' },
+                  { key: 'Referencia',  label: 'Referencia' },
+                  { key: 'Modelo',      label: 'Modelo' },
+                  { key: 'Descripción', label: 'Descripción' },
+                ] as { key: SortKey; label: string }[]).map(col => (
+                  <th key={col.key} onClick={() => toggleSort(col.key)}
+                    className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-left">
+                    {col.label}<SortIcon k={col.key} />
+                  </th>
+                ))}
+
+                <th onClick={() => toggleSort('Saldo Sistema')}
+                  className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-right">
+                  Stock<SortIcon k="Saldo Sistema" />
+                  <div className="flex items-center justify-end gap-2 mt-0.5 font-normal normal-case tracking-normal">
+                    <span style={{ color: BODEGA.cedi.color }}>CEDI</span>
+                    <span style={{ color: BODEGA.zf.color }}>ZF</span>
+                  </div>
+                </th>
+
+                <th className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] text-right whitespace-nowrap">
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button onClick={() => toggleSort('Rotación')} className="cursor-pointer select-none hover:text-[var(--text)]">
+                      Rotación<SortIcon k="Rotación" />
+                    </button>
+                    <div ref={rotRef}>
+                      <button onClick={openRotPopup}
+                        className="w-[15px] h-[15px] rounded-full border border-[var(--border)] text-[9px] font-bold text-[var(--text-muted)] hover:border-[var(--text-sub)] hover:text-[var(--text)] transition-colors flex items-center justify-center leading-none flex-shrink-0">
+                        ?
+                      </button>
+                    </div>
+                  </div>
+                </th>
+
+                {([
+                  { key: 'Valor Venta ($)', label: 'Valor Unit.' },
+                  { key: 'Valor Total',     label: 'Valor Total' },
+                ] as { key: SortKey; label: string }[]).map(col => (
+                  <th key={col.key} onClick={() => toggleSort(col.key)}
+                    className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-right">
+                    {col.label}<SortIcon k={col.key} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const marca = String(r._marca)
+                const color = MARCA_COLOR[marca] ?? '#94a3b8'
+                return (
+                  <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
+                    <td className="px-[10px] py-[9px]">
+                      <button onClick={() => handleMarcaClick(marca)} className="flex items-center gap-1.5 group">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+                        <span className="text-[11px] text-[var(--text-muted)] group-hover:text-[var(--text)] transition-colors">{marca}</span>
+                      </button>
+                    </td>
+                    <td className="px-[10px] py-[9px] text-[var(--text-sub)] num text-[11px]">{str(r, 'Referencia')}</td>
+                    <td className="px-[10px] py-[9px]">
+                      <button onClick={() => handleModeloClick(pickModelo(r))} className="font-medium text-[var(--text)] hover:underline text-left">
+                        {pickModelo(r)}
+                      </button>
+                    </td>
+                    <td className="px-[10px] py-[9px] text-[var(--text-sub)] max-w-[200px] truncate">{pickDesc(r)}</td>
+
+                    <td className="px-[10px] py-[9px] text-right">
+                      <div className="text-[11px] font-semibold text-[var(--text)] num">{fmtN(r._saldo)}</div>
+                      {(r._saldoCedi > 0 || r._saldoZF > 0) && (
+                        <div className="flex items-center justify-end gap-2 mt-0.5">
+                          <span className="text-[9px] num" style={{ color: BODEGA.cedi.color }}>{fmtN(r._saldoCedi)}</span>
+                          <span className="text-[9px] num" style={{ color: BODEGA.zf.color }}>{fmtN(r._saldoZF)}</span>
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="px-[10px] py-[9px] text-right">
+                      {r._rotEstado === 'Activo' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#22c55e]">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />Activo
+                        </span>
+                      ) : (
+                        <span className={`inline-block text-[11px] font-semibold tabular-nums ${
+                          r._rotEstado === 'CRITICO' ? 'text-[#ef4444]' :
+                          r._rotEstado === 'ALTO'    ? 'text-[#f97316]' :
+                          r._rotEstado === 'MEDIO'   ? 'text-[#f59e0b]' : 'text-[var(--text-sub)]'
+                        }`}>
+                          {fmtN(r._dias)} días
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-[10px] py-[9px] text-right num text-[11px] text-[var(--text-sub)]">{fmt(r._precio)}</td>
+                    <td className="px-[10px] py-[9px] text-right num text-[11px]">
+                      <span className="font-semibold text-[var(--text)]">{fmt(r._valorTotal)}</span>
+                    </td>
+                  </tr>
+                )
+              })}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-4 py-8 text-center text-[12px] text-[var(--text-muted)]">Sin resultados</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Popup rotación */}
+        {rotPopup && rotPopupPos && (
+          <div ref={rotRef}
+            style={{ position: 'fixed', top: rotPopupPos.top, right: rotPopupPos.right, zIndex: 9999 }}
+            className="w-[260px] bg-[var(--card)] border border-[var(--border)] rounded-[12px] shadow-lg p-4">
+            <div className="text-[12px] font-semibold text-[var(--text)] mb-1">Clasificación de rotación</div>
+            <p className="text-[10px] text-[var(--text-muted)] mb-3 leading-relaxed">
+              Basada en los días transcurridos desde la última venta registrada del producto.
+            </p>
+            <div className="space-y-2.5">
+              <div className="flex items-start gap-2">
+                <span className="w-2 h-2 rounded-full bg-[#22c55e] mt-[3px] flex-shrink-0" />
+                <div>
+                  <div className="text-[11px] font-semibold text-[#22c55e]">Activo</div>
+                  <div className="text-[10px] text-[var(--text-muted)] leading-relaxed mt-0.5">Producto con ventas recientes.</div>
+                </div>
+              </div>
+              {([
+                { estado: 'MEDIO',   color: '#f59e0b', label: 'Medio'   },
+                { estado: 'ALTO',    color: '#f97316', label: 'Alto'    },
+                { estado: 'CRITICO', color: '#ef4444', label: 'Crítico' },
+              ] as { estado: string; color: string; label: string }[]).map(({ estado, color, label }) => {
+                const d = daysPerEstado[estado]
+                return (
+                  <div key={estado} className="flex items-start gap-2">
+                    <span className="w-2 h-2 rounded-full mt-[3px] flex-shrink-0" style={{ background: color }} />
+                    <div>
+                      <div className="text-[11px] font-semibold" style={{ color }}>{label}</div>
+                      <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                        {d ? d.min === d.max ? `${d.min} días · ${d.count} SKUs` : `${d.min}–${d.max} días · ${d.count} SKUs` : 'Sin datos'}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
