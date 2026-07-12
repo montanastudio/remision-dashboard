@@ -151,7 +151,9 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const [stockMax,     setStockMax]     = useState<number | null>(null)
   const [query,        setQuery]        = useState('')
   const [modelSort,    setModelSort]    = useState<ModelSort>('stock')
+  const [selectedBase, setSelectedBase] = useState<string | null>(null)
   const [openBases,    setOpenBases]    = useState<Set<string>>(new Set())
+  const [openCurvas,   setOpenCurvas]   = useState<Set<string>>(new Set())
   const [openRefs,     setOpenRefs]     = useState<Set<string>>(new Set())
   const [sortKey,      setSortKey]      = useState<SortKey>('Valor Total')
   const [sortDir,      setSortDir]      = useState<SortDir>('desc')
@@ -351,35 +353,51 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     return list
   }, [enriched, marcaFilter, modeloFilter, curvaFilter, rangoActivo, inRango, query, sortKey, sortDir])
 
-  // ── Fichas por referencia+curva (desde rows: heredan TODOS los filtros) ────
-  // Base = referencia sin el sufijo de color: "6264C-01" → "6264C",
-  // "ATH-6011B-03" → "ATH-6011B" (la letra de curva se conserva en la base)
+  // ── Fichas jerárquicas: referencia → curva → color (desde rows) ────────────
+  // "6264C-01" → base "6264" + curva "C" + color "01"
+  // "ATH-6011B-03" → base "ATH-6011" + curva "B" (la letra de curva debe ir
+  // precedida de dígito para no comerse letras del nombre)
   const refGroups = useMemo(() => {
     const map: Record<string, {
-      base: string; curva: string; qty: number; valor: number; cedi: number; zf: number
-      items: Record<string, { ref: string; qty: number; cedi: number; zf: number }>
+      base: string; qty: number; valor: number; cedi: number; zf: number
+      curvas: Record<string, { curva: string; qty: number; valor: number; cedi: number; zf: number
+        items: Record<string, { ref: string; qty: number; cedi: number; zf: number }> }>
     }> = {}
     rows.forEach(r => {
       const ref = str(r, 'Referencia') || 'Sin referencia'
-      const m = ref.match(/^(.*)-(\d+)$/)
-      const base = m ? m[1] : ref
-      if (!map[base]) {
-        map[base] = { base, curva: detectarCurva({ Referencia: base }), qty: 0, valor: 0, cedi: 0, zf: 0, items: {} }
-      }
+      const mColor = ref.match(/^(.*)-(\d+)$/)
+      const stem   = mColor ? mColor[1] : ref
+      const mCurva = stem.match(/^(.*\d)([MLYCB])$/)
+      const base   = mCurva ? mCurva[1] : stem
+      const curva  = mCurva ? mCurva[2] : (detectarCurva(r) || '—')
+      if (!map[base]) map[base] = { base, qty: 0, valor: 0, cedi: 0, zf: 0, curvas: {} }
       const g = map[base]
-      g.qty   += r._saldo
-      g.valor += r._valorTotal
-      g.cedi  += r._saldoCedi
-      g.zf    += r._saldoZF
-      if (!g.items[ref]) g.items[ref] = { ref, qty: 0, cedi: 0, zf: 0 }
-      g.items[ref].qty  += r._saldo
-      g.items[ref].cedi += r._saldoCedi
-      g.items[ref].zf   += r._saldoZF
+      g.qty += r._saldo; g.valor += r._valorTotal; g.cedi += r._saldoCedi; g.zf += r._saldoZF
+      if (!g.curvas[curva]) g.curvas[curva] = { curva, qty: 0, valor: 0, cedi: 0, zf: 0, items: {} }
+      const cg = g.curvas[curva]
+      cg.qty += r._saldo; cg.valor += r._valorTotal; cg.cedi += r._saldoCedi; cg.zf += r._saldoZF
+      if (!cg.items[ref]) cg.items[ref] = { ref, qty: 0, cedi: 0, zf: 0 }
+      cg.items[ref].qty  += r._saldo
+      cg.items[ref].cedi += r._saldoCedi
+      cg.items[ref].zf   += r._saldoZF
     })
+    const curvaOrden = (c: string) => {
+      const i = (CURVAS_CONOCIDAS as readonly string[]).indexOf(c)
+      return i === -1 ? 99 : i
+    }
     return Object.values(map)
-      .map(g => ({ ...g, items: Object.values(g.items).sort((a, b) => a.ref.localeCompare(b.ref)) }))
+      .map(g => ({
+        ...g,
+        curvas: Object.values(g.curvas)
+          .map(cg => ({ ...cg, items: Object.values(cg.items).sort((a, b) => a.ref.localeCompare(b.ref)) }))
+          .sort((a, b) => curvaOrden(a.curva) - curvaOrden(b.curva)),
+      }))
       .sort((a, b) => a.base.localeCompare(b.base))
   }, [rows])
+
+  // Chip activo (si los filtros lo dejaron por fuera, vuelve a "Todas")
+  const activeBase = selectedBase && refGroups.some(g => g.base === selectedBase) ? selectedBase : null
+  const fichasVisibles = activeBase ? refGroups.filter(g => g.base === activeBase) : refGroups
 
   // Visibilidad: con modelo seleccionado se muestran todas; con solo búsqueda
   // se muestran hasta 12 (más allá, pedir afinar la búsqueda)
@@ -387,14 +405,18 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const showFichas   = refGroups.length > 0 && (modeloFilter !== null || query.trim() !== '')
   const fichasSobran = !modeloFilter && query.trim() !== '' && refGroups.length > FICHAS_MAX_QUERY
 
-  // Auto-expansión: si la búsqueda reduce a 1 ficha se abre sola;
-  // si además queda 1 solo color, se abre hasta las bodegas
+  // Auto-expansión: si la búsqueda reduce a 1 referencia se selecciona sola;
+  // 1 curva se abre; 1 color se abre hasta las bodegas
   useEffect(() => {
     if (!query.trim()) return
     if (refGroups.length === 1) {
       const g = refGroups[0]
-      setOpenBases(new Set([g.base]))
-      if (g.items.length === 1) setOpenRefs(new Set([g.items[0].ref]))
+      setSelectedBase(g.base)
+      if (g.curvas.length === 1) {
+        const cg = g.curvas[0]
+        setOpenCurvas(new Set([`${g.base}|${cg.curva}`]))
+        if (cg.items.length === 1) setOpenRefs(new Set([cg.items[0].ref]))
+      }
     }
   }, [refGroups, query])
 
@@ -403,6 +425,14 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       const next = new Set(prev)
       if (next.has(base)) next.delete(base)
       else next.add(base)
+      return next
+    })
+  }
+  function toggleCurva(key: string) {
+    setOpenCurvas(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -430,7 +460,9 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const zfPct   = kpiTotals.totalUnids > 0 ? (kpiTotals.zfUnids   / kpiTotals.totalUnids) * 100 : 0
 
   function resetAcordeones() {
+    setSelectedBase(null)
     setOpenBases(new Set())
+    setOpenCurvas(new Set())
     setOpenRefs(new Set())
   }
   function handleMarcaClick(name: string) {
@@ -804,98 +836,166 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                 {refGroups.length} referencias coinciden con la búsqueda — escribe más caracteres para afinar
               </div>
             ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2 items-start">
-                {refGroups.map(g => {
-                  const baseOpen = openBases.has(g.base)
-                  const curvaColor = CURVA_COLOR[g.curva]
-                  return (
-                    <div key={g.base} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
-                      {/* Nivel 1 — cabecera de la ficha */}
+              <>
+                {/* Chips de referencia — filtro fijo */}
+                {refGroups.length > 1 && (
+                  <div className="sticky top-[130px] md:top-[150px] z-[9] flex flex-wrap items-center gap-1.5 mb-2 py-2 bg-[var(--card)]">
+                    <button
+                      onClick={() => setSelectedBase(null)}
+                      className={`text-[11px] font-medium px-3 py-[4px] rounded-full border transition-all leading-none ${
+                        !activeBase
+                          ? 'bg-[var(--text-sub)] border-[var(--text-sub)] text-[var(--card)]'
+                          : 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--nav-hover)]'
+                      }`}
+                    >
+                      Todas
+                    </button>
+                    {refGroups.map(g => (
                       <button
-                        onClick={() => toggleBase(g.base)}
-                        aria-expanded={baseOpen}
-                        className="w-full flex items-center gap-2 px-3 py-[10px] hover:bg-[var(--nav-hover)] transition-colors"
+                        key={g.base}
+                        onClick={() => setSelectedBase(activeBase === g.base ? null : g.base)}
+                        className={`inline-flex items-center gap-1.5 text-[11px] font-semibold num px-3 py-[4px] rounded-full border transition-all leading-none ${
+                          activeBase === g.base
+                            ? 'bg-[var(--brand-blue)] border-[var(--brand-blue)] text-white'
+                            : 'border-[var(--border)] text-[var(--text-sub)] hover:bg-[var(--nav-hover)]'
+                        }`}
                       >
-                        <span className="text-[13px] font-bold text-[var(--text)] num truncate">{g.base}</span>
-                        {curvaColor && (
-                          <span className="text-[9px] font-semibold px-2 py-[2px] rounded-full text-white flex-shrink-0"
-                            style={{ background: curvaColor }}>
-                            Curva {CURVA_LABEL[g.curva] ?? g.curva}
-                          </span>
-                        )}
-                        <span className="ml-auto text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
-                          {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
+                        {g.base}
+                        <span className={activeBase === g.base ? 'text-white/75 font-normal' : 'text-[var(--text-muted)] font-normal'}>
+                          {fmtN(g.qty)}
                         </span>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                          className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${baseOpen ? 'rotate-180' : ''}`}>
-                          <polyline points="6 9 12 15 18 9" />
-                        </svg>
                       </button>
+                    ))}
+                  </div>
+                )}
 
-                      {/* Nivel 2 — colores (referencia izquierda · cantidad derecha) */}
-                      {baseOpen && (
-                        <div className="border-t border-[var(--border)] px-3 pb-2 fade-in-up">
-                          {g.items.map((it, idx) => {
-                            const refOpen = openRefs.has(it.ref)
-                            return (
-                              <div key={it.ref} className={idx < g.items.length - 1 || refOpen ? 'border-b border-[var(--border)]' : ''}>
-                                <button
-                                  onClick={() => toggleRef(it.ref)}
-                                  aria-expanded={refOpen}
-                                  className="w-full flex items-center gap-2 py-[8px] hover:bg-[var(--nav-hover)] transition-colors rounded-[4px] px-1 -mx-1"
-                                >
-                                  <span className="text-[11px] num text-[var(--text-sub)] truncate">{it.ref}</span>
-                                  <span className="ml-auto text-[13px] font-semibold num text-[var(--text)] flex-shrink-0">
-                                    {fmtN(it.qty)}
-                                    <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und</span>
-                                  </span>
-                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                                    className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${refOpen ? 'rotate-180' : ''}`}>
-                                    <polyline points="6 9 12 15 18 9" />
-                                  </svg>
-                                </button>
+                {/* Fichas: referencia → curva → color → bodega */}
+                <div className="space-y-2">
+                  {fichasVisibles.map(g => {
+                    const isSelected = activeBase === g.base
+                    const baseOpen = isSelected || openBases.has(g.base)
+                    return (
+                      <div key={g.base} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
+                        {/* Nivel 1 — referencia */}
+                        <button
+                          onClick={() => { if (!isSelected) toggleBase(g.base) }}
+                          aria-expanded={baseOpen}
+                          className={`w-full flex items-center gap-2 px-3 py-[10px] transition-colors ${isSelected ? 'cursor-default' : 'hover:bg-[var(--nav-hover)]'}`}
+                        >
+                          <span className="text-[13px] font-bold text-[var(--text)] num truncate">{g.base}</span>
+                          <span className="text-[10px] text-[var(--text-muted)] flex-shrink-0">
+                            {g.curvas.length} {g.curvas.length === 1 ? 'curva' : 'curvas'}
+                          </span>
+                          <span className="ml-auto text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
+                            {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
+                          </span>
+                          {!isSelected && (
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                              className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${baseOpen ? 'rotate-180' : ''}`}>
+                              <polyline points="6 9 12 15 18 9" />
+                            </svg>
+                          )}
+                        </button>
 
-                                {/* Nivel 3 — listado de bodegas */}
-                                {refOpen && (
-                                  <div className="pb-2.5 pt-0.5 space-y-1 fade-in-up">
-                                    <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
-                                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.cedi.color }} />
-                                      <span className="text-[11px] text-[var(--text-sub)]">Bodega CEDI</span>
-                                      <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.cedi.color }}>
-                                        {fmtN(it.cedi)} und
-                                      </span>
+                        {/* Nivel 2 — curvas */}
+                        {baseOpen && (
+                          <div className="border-t border-[var(--border)] px-3 pb-2 fade-in-up">
+                            {g.curvas.map(cg => {
+                              const curvaKey  = `${g.base}|${cg.curva}`
+                              const curvaOpen = openCurvas.has(curvaKey)
+                              const cColor    = CURVA_COLOR[cg.curva] ?? '#94a3b8'
+                              return (
+                                <div key={curvaKey} className="border-b border-[var(--border)] last:border-0">
+                                  <button
+                                    onClick={() => toggleCurva(curvaKey)}
+                                    aria-expanded={curvaOpen}
+                                    className="w-full flex items-center gap-2 py-[8px] hover:bg-[var(--nav-hover)] transition-colors rounded-[4px] px-1 -mx-1"
+                                  >
+                                    <span className="text-[10px] font-semibold px-2 py-[2px] rounded-full text-white flex-shrink-0"
+                                      style={{ background: cColor }}>
+                                      Curva {CURVA_LABEL[cg.curva] ?? cg.curva}
+                                    </span>
+                                    <span className="text-[10px] text-[var(--text-muted)]">{cg.items.length} colores</span>
+                                    <span className="ml-auto text-[13px] font-semibold num text-[var(--text)] flex-shrink-0">
+                                      {fmtN(cg.qty)}
+                                      <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und</span>
+                                    </span>
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                                      className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${curvaOpen ? 'rotate-180' : ''}`}>
+                                      <polyline points="6 9 12 15 18 9" />
+                                    </svg>
+                                  </button>
+
+                                  {/* Nivel 3 — colores */}
+                                  {curvaOpen && (
+                                    <div className="pb-1.5 fade-in-up">
+                                      {g.curvas.length > 0 && cg.items.map(it => {
+                                        const refOpen = openRefs.has(it.ref)
+                                        return (
+                                          <div key={it.ref}>
+                                            <button
+                                              onClick={() => toggleRef(it.ref)}
+                                              aria-expanded={refOpen}
+                                              className="w-full flex items-center gap-2 py-[7px] pl-4 pr-1 hover:bg-[var(--nav-hover)] transition-colors rounded-[4px]"
+                                            >
+                                              <span className="text-[11px] num text-[var(--text-sub)] truncate">{it.ref}</span>
+                                              <span className="ml-auto text-[12px] font-semibold num text-[var(--text)] flex-shrink-0">
+                                                {fmtN(it.qty)}
+                                                <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und</span>
+                                              </span>
+                                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                                                className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${refOpen ? 'rotate-180' : ''}`}>
+                                                <polyline points="6 9 12 15 18 9" />
+                                              </svg>
+                                            </button>
+
+                                            {/* Nivel 4 — listado de bodegas */}
+                                            {refOpen && (
+                                              <div className="pb-2 pt-0.5 pl-8 pr-1 space-y-1 fade-in-up">
+                                                <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
+                                                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.cedi.color }} />
+                                                  <span className="text-[11px] text-[var(--text-sub)]">Bodega CEDI</span>
+                                                  <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.cedi.color }}>
+                                                    {fmtN(it.cedi)} und
+                                                  </span>
+                                                </div>
+                                                <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
+                                                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.zf.color }} />
+                                                  <span className="text-[11px] text-[var(--text-sub)]">Zona Franca</span>
+                                                  <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.zf.color }}>
+                                                    {fmtN(it.zf)} und
+                                                  </span>
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )
+                                      })}
                                     </div>
-                                    <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
-                                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.zf.color }} />
-                                      <span className="text-[11px] text-[var(--text-sub)]">Zona Franca</span>
-                                      <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.zf.color }}>
-                                        {fmtN(it.zf)} und
-                                      </span>
-                                    </div>
-                                  </div>
-                                )}
+                                  )}
+                                </div>
+                              )
+                            })}
+
+                            {/* Pie de la referencia: split bodegas + valor */}
+                            <div className="flex items-center justify-between pt-2">
+                              <div className="flex items-center gap-2.5">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }} title="Bodega CEDI">
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />{fmtN(g.cedi)}
+                                </span>
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }} title="Zona Franca">
+                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />{fmtN(g.zf)}
+                                </span>
                               </div>
-                            )
-                          })}
-
-                          {/* Pie del grupo: split bodegas + valor */}
-                          <div className="flex items-center justify-between pt-2">
-                            <div className="flex items-center gap-2.5">
-                              <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }} title="Bodega CEDI">
-                                <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />{fmtN(g.cedi)}
-                              </span>
-                              <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }} title="Zona Franca">
-                                <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />{fmtN(g.zf)}
-                              </span>
+                              <span className="text-[10px] text-[var(--text-muted)] num">{fmt(g.valor)}</span>
                             </div>
-                            <span className="text-[10px] text-[var(--text-muted)] num">{fmt(g.valor)}</span>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
             )}
           </div>
         )}
