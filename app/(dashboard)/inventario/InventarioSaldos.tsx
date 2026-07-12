@@ -480,7 +480,61 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     : marcaFilter ? `Total ${marcaFilter}` : 'Inventario total'
 
   return (
-    <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-5 md:items-start">
+    <div>
+      {/* ════════ Barra de totales — arriba de todo, ancho completo, sticky ════════ */}
+      <div className="sticky top-[62px] md:top-[74px] z-10 mb-5 rounded-[10px] border border-[var(--border)] bg-[var(--card)] shadow-card px-4 py-3">
+        <div className="flex items-center gap-4 md:gap-6 flex-wrap">
+          <div>
+            <div className="text-[10px] text-[var(--text-muted)] leading-tight">{tituloTotales}</div>
+            <div className="text-[20px] font-bold num text-[var(--text)] leading-tight">
+              {fmtN(kpiTotals.totalUnids)}
+              <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und · {fmtN(kpiTotals.totalSKUs)} SKUs</span>
+            </div>
+            <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.totalValor)}</div>
+          </div>
+
+          <div>
+            <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.cedi.color }}>
+              <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.cedi.color }} />
+              CEDI
+            </div>
+            <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.cedi.color }}>
+              {fmtN(kpiTotals.cediUnids)}
+              <span className="text-[10px] font-normal ml-1">· {Math.round(cediPct)}%</span>
+            </div>
+            <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.cediValor)}</div>
+          </div>
+
+          <div>
+            <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.zf.color }}>
+              <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.zf.color }} />
+              Zona Franca
+            </div>
+            <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.zf.color }}>
+              {fmtN(kpiTotals.zfUnids)}
+              <span className="text-[10px] font-normal ml-1">· {Math.round(zfPct)}%</span>
+            </div>
+            <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.zfValor)}</div>
+          </div>
+
+          <div className="flex-1 min-w-[110px]">
+            <div className="h-[6px] rounded-full overflow-hidden flex bg-[var(--border)]">
+              <div className="h-full transition-all duration-500" style={{ width: `${cediPct}%`, background: BODEGA.cedi.color }} />
+              <div className="h-full transition-all duration-500" style={{ width: `${zfPct}%`,   background: BODEGA.zf.color }} />
+            </div>
+            {hayFiltros && (
+              <button
+                onClick={clearFilters}
+                className="mt-1.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-2"
+              >
+                Quitar filtros
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-5 md:items-start">
 
       {/* ════════ Columna de navegación (sidebar en desktop, bloque inicial en móvil) ════════ */}
       <aside className="mb-5 md:mb-0 md:sticky md:top-[86px] space-y-4">
@@ -647,59 +701,6 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
 
       {/* ════════ Contenido principal ════════ */}
       <div className="min-w-0">
-
-        {/* Barra de totales — sticky */}
-        <div className="sticky top-[62px] md:top-[74px] z-10 mb-4 rounded-[10px] border border-[var(--border)] bg-[var(--card)] shadow-card px-4 py-3">
-          <div className="flex items-center gap-4 md:gap-6 flex-wrap">
-            <div>
-              <div className="text-[10px] text-[var(--text-muted)] leading-tight">{tituloTotales}</div>
-              <div className="text-[20px] font-bold num text-[var(--text)] leading-tight">
-                {fmtN(kpiTotals.totalUnids)}
-                <span className="text-[10px] font-normal text-[var(--text-muted)] ml-1">und · {fmtN(kpiTotals.totalSKUs)} SKUs</span>
-              </div>
-              <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.totalValor)}</div>
-            </div>
-
-            <div>
-              <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.cedi.color }}>
-                <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.cedi.color }} />
-                CEDI
-              </div>
-              <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.cedi.color }}>
-                {fmtN(kpiTotals.cediUnids)}
-                <span className="text-[10px] font-normal ml-1">· {Math.round(cediPct)}%</span>
-              </div>
-              <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.cediValor)}</div>
-            </div>
-
-            <div>
-              <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.zf.color }}>
-                <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.zf.color }} />
-                Zona Franca
-              </div>
-              <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.zf.color }}>
-                {fmtN(kpiTotals.zfUnids)}
-                <span className="text-[10px] font-normal ml-1">· {Math.round(zfPct)}%</span>
-              </div>
-              <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.zfValor)}</div>
-            </div>
-
-            <div className="flex-1 min-w-[110px]">
-              <div className="h-[6px] rounded-full overflow-hidden flex bg-[var(--border)]">
-                <div className="h-full transition-all duration-500" style={{ width: `${cediPct}%`, background: BODEGA.cedi.color }} />
-                <div className="h-full transition-all duration-500" style={{ width: `${zfPct}%`,   background: BODEGA.zf.color }} />
-              </div>
-              {hayFiltros && (
-                <button
-                  onClick={clearFilters}
-                  className="mt-1.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-2"
-                >
-                  Quitar filtros
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
 
         {/* Chips de curva */}
         {modeloFilter && curvasDelModelo.length > 0 && (
@@ -1059,6 +1060,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   )
