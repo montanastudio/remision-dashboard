@@ -70,11 +70,6 @@ export default async function InventarioPage({
     color: 'var(--brand-blue)',
   }))
 
-  // ── Saldos — hoja nueva usa 'Valor a Precio Venta ($)', la vieja 'Vr. Existencia ($)' ──
-  const totalSaldosValor = conStock.length > 0
-    ? conStock.reduce((s, r) => s + parseNum(r['Valor a Precio Venta ($)']), 0)
-    : totalValor
-
   return (
     <div className="fade-in-up">
       <div className="text-[11px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)] mb-3">
@@ -122,19 +117,9 @@ export default async function InventarioPage({
 
       {/* ── TAB: Saldos Físicos ── */}
       {tab === 'saldos' && (
-        <>
-          <div className="mb-4">
-            <MetricCard
-              label="Valor Total Saldos Físicos"
-              value={fmt(totalSaldosValor)}
-              sub={`${saldosData.length} SKUs en stock`}
-            />
-          </div>
-
-          <Card title="Saldos Físicos" subtitle="stock actual por referencia">
-            <InventarioSaldos saldos={saldosData} sinRotar={sinRotar} />
-          </Card>
-        </>
+        <Card title="Saldos Físicos" subtitle="stock actual por referencia">
+          <InventarioSaldos saldos={saldosData} sinRotar={sinRotar} />
+        </Card>
       )}
     </div>
   )
