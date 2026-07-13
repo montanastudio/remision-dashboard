@@ -513,8 +513,14 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
 
   return (
     <div>
-      {/* ════════ Barra de totales — arriba de todo, ancho completo, sticky ════════ */}
-      <div className="sticky top-[62px] md:top-[74px] z-10 mb-5 rounded-[10px] border border-[var(--border)] bg-[var(--card)] shadow-card px-4 py-3">
+      {/* ════════ Encabezado — justo debajo del botón de pestaña ════════ */}
+      <div className="flex items-baseline gap-2 mb-3">
+        <span className="text-[13.5px] font-bold text-[var(--text)]">Saldos Físicos</span>
+        <span className="text-[11px] text-[var(--text-muted)]">stock actual por referencia</span>
+      </div>
+
+      {/* ════════ Ficha 1 — Inventario total (independiente, ancho completo) ════════ */}
+      <div className="sticky top-[62px] md:top-[74px] z-10 mb-5 rounded-[12px] border border-[var(--border)] bg-[var(--card)] shadow-card px-4 py-3">
         <div className="flex items-center gap-4 md:gap-6 flex-wrap">
           <div>
             <div className="text-[10px] text-[var(--text-muted)] leading-tight">{tituloTotales}</div>
@@ -566,10 +572,10 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
         </div>
       </div>
 
-      <div className="md:grid md:grid-cols-[236px_minmax(0,1fr)] md:gap-5 md:items-start">
+      <div className="md:grid md:grid-cols-[252px_minmax(0,1fr)] md:gap-5 md:items-start">
 
-      {/* ════════ Columna de navegación (sidebar en desktop, bloque inicial en móvil) ════════ */}
-      <aside className="mb-5 md:mb-0 md:sticky md:top-[86px] space-y-4">
+      {/* ════════ Ficha 2 — Filtros (fija/sticky al hacer scroll) ════════ */}
+      <aside className="mb-5 md:mb-0 md:sticky md:top-[172px] rounded-[12px] border border-[var(--border)] bg-[var(--card)] shadow-card p-4 space-y-4">
 
         {/* Buscador */}
         <input
@@ -731,8 +737,10 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
         </div>
       </aside>
 
-      {/* ════════ Contenido principal ════════ */}
-      <div className="min-w-0">
+      {/* ════════ Ficha 3 — Análisis (scroll propio e independiente) ════════ */}
+      <div
+        className="min-w-0 rounded-[12px] border border-[var(--border)] bg-[var(--card)] shadow-card p-4 md:sticky md:top-[172px] md:max-h-[calc(100vh-192px)] overflow-y-auto"
+      >
 
         {/* Chips de curva */}
         {modeloFilter && curvasDelModelo.length > 0 && (
@@ -839,7 +847,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
               <>
                 {/* Chips de referencia — filtro fijo */}
                 {refGroups.length > 1 && (
-                  <div className="sticky top-[130px] md:top-[150px] z-[9] flex flex-wrap items-center gap-1.5 mb-2 py-2 bg-[var(--card)]">
+                  <div className="sticky top-0 z-[9] flex flex-wrap items-center gap-1.5 mb-2 py-2 bg-[var(--card)]">
                     <button
                       onClick={() => setSelectedBase(null)}
                       className={`text-[11px] font-medium px-3 py-[4px] rounded-full border transition-all leading-none ${

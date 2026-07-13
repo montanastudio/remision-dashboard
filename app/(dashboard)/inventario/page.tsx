@@ -117,9 +117,7 @@ export default async function InventarioPage({
 
       {/* ── TAB: Saldos Físicos ── */}
       {tab === 'saldos' && (
-        <Card title="Saldos Físicos" subtitle="stock actual por referencia">
-          <InventarioSaldos saldos={saldosData} sinRotar={sinRotar} />
-        </Card>
+        <InventarioSaldos saldos={saldosData} sinRotar={sinRotar} />
       )}
     </div>
   )
