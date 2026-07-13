@@ -357,6 +357,11 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   // "6264C-01" → base "6264" + curva "C" + color "01"
   // "ATH-6011B-03" → base "ATH-6011" + curva "B" (la letra de curva debe ir
   // precedida de dígito para no comerse letras del nombre)
+  //
+  // El agrupado de varias curvas bajo una misma referencia (6264 → C/M/Y)
+  // es solo para Vitek. Las demás marcas mantienen la curva dentro de la
+  // base (una ficha por referencia+curva, como antes), que además se
+  // auto-expande directo al color por tener siempre 1 sola curva.
   const refGroups = useMemo(() => {
     const map: Record<string, {
       base: string; qty: number; valor: number; cedi: number; zf: number
@@ -365,11 +370,12 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     }> = {}
     rows.forEach(r => {
       const ref = str(r, 'Referencia') || 'Sin referencia'
-      const mColor = ref.match(/^(.*)-(\d+)$/)
-      const stem   = mColor ? mColor[1] : ref
-      const mCurva = stem.match(/^(.*\d)([MLYCB])$/)
-      const base   = mCurva ? mCurva[1] : stem
-      const curva  = mCurva ? mCurva[2] : (detectarCurva(r) || '—')
+      const mColor  = ref.match(/^(.*)-(\d+)$/)
+      const stem    = mColor ? mColor[1] : ref
+      const esVitek = r._marca === 'Vitek'
+      const mCurva  = esVitek ? stem.match(/^(.*\d)([MLYCB])$/) : null
+      const base    = mCurva ? mCurva[1] : stem
+      const curva   = mCurva ? mCurva[2] : (detectarCurva(r) || '—')
       if (!map[base]) map[base] = { base, qty: 0, valor: 0, cedi: 0, zf: 0, curvas: {} }
       const g = map[base]
       g.qty += r._saldo; g.valor += r._valorTotal; g.cedi += r._saldoCedi; g.zf += r._saldoZF
