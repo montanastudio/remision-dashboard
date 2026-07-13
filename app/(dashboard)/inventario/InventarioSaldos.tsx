@@ -909,8 +909,11 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                         {baseOpen && (
                           <div className="border-t border-[var(--border)] px-3 pb-2 fade-in-up">
                             {g.curvas.map(cg => {
-                              const curvaKey  = `${g.base}|${cg.curva}`
-                              const curvaOpen = openCurvas.has(curvaKey)
+                              const curvaKey = `${g.base}|${cg.curva}`
+                              // Con una sola curva se abre directo al color; openCurvas
+                              // guarda el toggle manual, así el usuario puede colapsarla igual
+                              const curvaDefaultOpen = g.curvas.length === 1
+                              const curvaOpen = curvaDefaultOpen ? !openCurvas.has(curvaKey) : openCurvas.has(curvaKey)
                               const cColor    = CURVA_COLOR[cg.curva] ?? '#94a3b8'
                               return (
                                 <div key={curvaKey} className="border-b border-[var(--border)] last:border-0">
