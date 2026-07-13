@@ -358,25 +358,25 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   // "ATH-6011B-03" → base "ATH-6011" + curva "B" (la letra de curva debe ir
   // precedida de dígito para no comerse letras del nombre)
   //
-  // El agrupado de varias curvas bajo una misma referencia (6264 → C/M/Y)
-  // es solo para Vitek. Las demás marcas mantienen la curva dentro de la
-  // base (una ficha por referencia+curva, como antes), que además se
-  // auto-expande directo al color por tener siempre 1 sola curva.
+  // El agrupado por referencia base (que junta varias curvas bajo un mismo
+  // número) aplica a todas las marcas por igual. Lo que cambia por marca es
+  // solo la presentación: Vitek nestea (hay que abrir la referencia para ver
+  // las curvas); el resto de marcas muestra las curvas directo, sin ese
+  // click extra, porque su única variación entre referencias es la curva.
   const refGroups = useMemo(() => {
     const map: Record<string, {
-      base: string; qty: number; valor: number; cedi: number; zf: number
+      base: string; marca: string; qty: number; valor: number; cedi: number; zf: number
       curvas: Record<string, { curva: string; qty: number; valor: number; cedi: number; zf: number
         items: Record<string, { ref: string; qty: number; cedi: number; zf: number }> }>
     }> = {}
     rows.forEach(r => {
       const ref = str(r, 'Referencia') || 'Sin referencia'
-      const mColor  = ref.match(/^(.*)-(\d+)$/)
-      const stem    = mColor ? mColor[1] : ref
-      const esVitek = r._marca === 'Vitek'
-      const mCurva  = esVitek ? stem.match(/^(.*\d)([MLYCB])$/) : null
-      const base    = mCurva ? mCurva[1] : stem
-      const curva   = mCurva ? mCurva[2] : (detectarCurva(r) || '—')
-      if (!map[base]) map[base] = { base, qty: 0, valor: 0, cedi: 0, zf: 0, curvas: {} }
+      const mColor = ref.match(/^(.*)-(\d+)$/)
+      const stem   = mColor ? mColor[1] : ref
+      const mCurva = stem.match(/^(.*\d)([MLYCB])$/)
+      const base   = mCurva ? mCurva[1] : stem
+      const curva  = mCurva ? mCurva[2] : (detectarCurva(r) || '—')
+      if (!map[base]) map[base] = { base, marca: r._marca, qty: 0, valor: 0, cedi: 0, zf: 0, curvas: {} }
       const g = map[base]
       g.qty += r._saldo; g.valor += r._valorTotal; g.cedi += r._saldoCedi; g.zf += r._saldoZF
       if (!g.curvas[curva]) g.curvas[curva] = { curva, qty: 0, valor: 0, cedi: 0, zf: 0, items: {} }
@@ -886,30 +886,46 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                 {/* Fichas: referencia → curva → color → bodega */}
                 <div className="space-y-2">
                   {fichasVisibles.map(g => {
+                    const esVitek = g.marca === 'Vitek'
                     const isSelected = activeBase === g.base
-                    const baseOpen = isSelected || openBases.has(g.base)
+                    // Vitek nestea (hay que abrir la referencia); el resto de
+                    // marcas muestra las curvas directo, siempre abiertas
+                    const baseOpen = esVitek ? (isSelected || openBases.has(g.base)) : true
+                    const baseInteractive = esVitek && !isSelected
                     return (
                       <div key={g.base} className="rounded-[10px] border border-[var(--border)] bg-[var(--bg)] overflow-hidden">
                         {/* Nivel 1 — referencia */}
-                        <button
-                          onClick={() => { if (!isSelected) toggleBase(g.base) }}
-                          aria-expanded={baseOpen}
-                          className={`w-full flex items-center gap-2 px-3 py-[10px] transition-colors ${isSelected ? 'cursor-default' : 'hover:bg-[var(--nav-hover)]'}`}
-                        >
-                          <span className="text-[13px] font-bold text-[var(--text)] num truncate">{g.base}</span>
-                          <span className="text-[10px] text-[var(--text-muted)] flex-shrink-0">
-                            {g.curvas.length} {g.curvas.length === 1 ? 'curva' : 'curvas'}
-                          </span>
-                          <span className="ml-auto text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
-                            {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
-                          </span>
-                          {!isSelected && (
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
-                              className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${baseOpen ? 'rotate-180' : ''}`}>
-                              <polyline points="6 9 12 15 18 9" />
-                            </svg>
-                          )}
-                        </button>
+                        {esVitek ? (
+                          <button
+                            onClick={() => { if (baseInteractive) toggleBase(g.base) }}
+                            aria-expanded={baseOpen}
+                            className={`w-full flex items-center gap-2 px-3 py-[10px] transition-colors ${baseInteractive ? 'hover:bg-[var(--nav-hover)]' : 'cursor-default'}`}
+                          >
+                            <span className="text-[13px] font-bold text-[var(--text)] num truncate">{g.base}</span>
+                            <span className="text-[10px] text-[var(--text-muted)] flex-shrink-0">
+                              {g.curvas.length} {g.curvas.length === 1 ? 'curva' : 'curvas'}
+                            </span>
+                            <span className="ml-auto text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
+                              {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
+                            </span>
+                            {baseInteractive && (
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+                                className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${baseOpen ? 'rotate-180' : ''}`}>
+                                <polyline points="6 9 12 15 18 9" />
+                              </svg>
+                            )}
+                          </button>
+                        ) : (
+                          <div className="w-full flex items-center gap-2 px-3 py-[10px]">
+                            <span className="text-[13px] font-bold text-[var(--text)] num truncate">{g.base}</span>
+                            <span className="text-[10px] text-[var(--text-muted)] flex-shrink-0">
+                              {g.curvas.length} {g.curvas.length === 1 ? 'curva' : 'curvas'}
+                            </span>
+                            <span className="ml-auto text-[15px] font-bold text-[var(--text)] num flex-shrink-0">
+                              {fmtN(g.qty)} <span className="text-[10px] font-normal text-[var(--text-muted)]">und</span>
+                            </span>
+                          </div>
+                        )}
 
                         {/* Nivel 2 — curvas */}
                         {baseOpen && (
