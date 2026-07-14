@@ -137,6 +137,13 @@ const BODEGA = {
   zf:   { label: 'Zona Franca', color: '#f59e0b' },
 }
 
+const ESTADOS_ROTACION = [
+  { estado: 'Activo',  label: 'Activo',  color: '#22c55e' },
+  { estado: 'MEDIO',   label: 'Medio',   color: '#f59e0b' },
+  { estado: 'ALTO',    label: 'Alto',    color: '#f97316' },
+  { estado: 'CRITICO', label: 'Crítico', color: '#ef4444' },
+] as const
+
 type SortKey = 'Marca' | 'Referencia' | 'Modelo' | 'Descripción' | 'Saldo Sistema' | 'Valor Venta ($)' | 'Valor Total' | 'Rotación'
 type SortDir = 'asc' | 'desc'
 type ModelSort = 'stock' | 'az'
@@ -147,6 +154,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const [marcaFilter,  setMarcaFilter]  = useState<string | null>(null)
   const [modeloFilter, setModeloFilter] = useState<string | null>(null)
   const [curvaFilter,  setCurvaFilter]  = useState<string | null>(null)
+  const [estadoFilter, setEstadoFilter] = useState<string | null>(null)
   const [stockMin,     setStockMin]     = useState(0)
   const [stockMax,     setStockMax]     = useState<number | null>(null)
   const [query,        setQuery]        = useState('')
@@ -253,6 +261,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     const q = query.toLowerCase().trim()
     const base = (marcaFilter ? enriched.filter(r => r._marca === marcaFilter) : enriched)
       .filter(r => inRango(r._saldo))
+      .filter(r => !estadoFilter || r._rotEstado === estadoFilter)
     const map: Record<string, { valor: number; qty: number }> = {}
     base.forEach(r => {
       const m = pickModelo(r)
@@ -279,7 +288,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     return modelSort === 'az'
       ? withNivel.sort((a, b) => a.nombre.localeCompare(b.nombre))
       : withNivel.sort((a, b) => b.qty - a.qty)
-  }, [enriched, marcaFilter, inRango, query, modelSort])
+  }, [enriched, marcaFilter, inRango, estadoFilter, query, modelSort])
 
   const str = (r: EnrichedRow, k: string) => String(r[k] ?? '')
 
@@ -322,6 +331,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     if (modeloFilter) list = list.filter(r => pickModelo(r) === modeloFilter)
     if (curvaFilter)  list = list.filter(r => detectarCurva(r) === curvaFilter)
     if (rangoActivo)  list = list.filter(r => inRango(r._saldo))
+    if (estadoFilter) list = list.filter(r => r._rotEstado === estadoFilter)
     if (q) {
       // Multi-término: cada palabra debe coincidir en algún campo (ref, modelo,
       // descripción, código o marca), normalizando espacios y guiones
@@ -351,7 +361,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       return sortDir === 'asc' ? va - (vb as number) : (vb as number) - va
     })
     return list
-  }, [enriched, marcaFilter, modeloFilter, curvaFilter, rangoActivo, inRango, query, sortKey, sortDir])
+  }, [enriched, marcaFilter, modeloFilter, curvaFilter, rangoActivo, inRango, estadoFilter, query, sortKey, sortDir])
 
   // ── Fichas jerárquicas: referencia → curva → color (desde rows) ────────────
   // "6264C-01" → base "6264" + curva "C" + color "01"
@@ -483,12 +493,17 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     resetAcordeones()
   }
   function clearFilters() {
-    setMarcaFilter(null); setModeloFilter(null); setCurvaFilter(null)
+    setMarcaFilter(null); setModeloFilter(null); setCurvaFilter(null); setEstadoFilter(null)
     setStockMin(0); setStockMax(null); setQuery('')
     resetAcordeones()
   }
+  function handleEstadoClick(estado: string) {
+    setEstadoFilter(prev => prev === estado ? null : estado)
+    setModeloFilter(null); setCurvaFilter(null)
+    resetAcordeones()
+  }
 
-  const hayFiltros = Boolean(marcaFilter || modeloFilter || curvaFilter || rangoActivo || query)
+  const hayFiltros = Boolean(marcaFilter || modeloFilter || curvaFilter || estadoFilter || rangoActivo || query)
 
   const daysPerEstado = useMemo(() => {
     const map: Record<string, { min: number; max: number; count: number }> = {}
@@ -670,6 +685,39 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
               }}
               className="w-full rounded-[6px] border border-[var(--border)] bg-[var(--bg)] px-2 py-[4px] text-[11px] num text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--brand-blue)]"
             />
+          </div>
+        </div>
+
+        {/* Estado de rotación */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Rotación</span>
+            {estadoFilter && (
+              <button
+                onClick={() => setEstadoFilter(null)}
+                className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] underline underline-offset-2"
+              >
+                Quitar
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {ESTADOS_ROTACION.map(({ estado, label, color }) => {
+              const isActive = estadoFilter === estado
+              return (
+                <button
+                  key={estado}
+                  onClick={() => handleEstadoClick(estado)}
+                  className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-[4px] text-[11px] font-medium transition-all leading-none"
+                  style={isActive
+                    ? { background: color, borderColor: color, color: '#fff' }
+                    : { background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text-sub)' }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: isActive ? '#fff' : color }} />
+                  {label}
+                </button>
+              )
+            })}
           </div>
         </div>
 
