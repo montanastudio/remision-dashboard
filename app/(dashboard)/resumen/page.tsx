@@ -1,4 +1,5 @@
 import { getSheetData, rowsToObjects, normalizeVentasColumns, parseNum, parseFecha } from '@/lib/sheets'
+import { computeSinRotar } from '@/lib/rotacion'
 import { filtrarVentas, filtroLabel } from '@/lib/filtro-ventas'
 import { fmt, fmtN } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
@@ -22,16 +23,20 @@ export default async function ResumenPage({
   type Row = Record<string, string>
   let ventas: Row[] = []
   let carteraRes: Row[] = []
-  let sinRotar: Row[] = []
+  let inventarioStock: Row[] = []
+  let movimientos: Row[] = []
   let metasRows: Row[] = []
   let ventasMensual: Row[] = []
 
   // ── Fetch principal: cada hoja por separado para que un fallo no afecte las demás ──
-  try { ventas        = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel'))) } catch { /* no configurado */ }
-  try { carteraRes    = rowsToObjects(await getSheetData('RAW_Cartera'))          } catch { /* hoja no existe */ }
-  try { sinRotar      = rowsToObjects(await getSheetData('RAW_Sin_Rotar'))       } catch { /* hoja no existe */ }
-  try { metasRows     = rowsToObjects(await getSheetData('LS METAS Y PROYECCION')) } catch { /* hoja no existe */ }
-  try { ventasMensual = rowsToObjects(await getSheetData('RES_Ventas_Mensual')) } catch { /* hoja no existe */ }
+  try { ventas          = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas'))) } catch { /* no configurado */ }
+  try { carteraRes      = rowsToObjects(await getSheetData('RAW_Cartera'))          } catch { /* hoja no existe */ }
+  try { inventarioStock = rowsToObjects(await getSheetData('RAW_Inventario_Stock')) } catch { /* hoja no existe */ }
+  try { movimientos     = rowsToObjects(await getSheetData('RAW_Movimientos'))      } catch { /* hoja no existe */ }
+  try { metasRows       = rowsToObjects(await getSheetData('LS METAS Y PROYECCION')) } catch { /* hoja no existe */ }
+  try { ventasMensual   = rowsToObjects(await getSheetData('RES_Ventas_Mensual')) } catch { /* hoja no existe */ }
+
+  const sinRotar = computeSinRotar(movimientos, inventarioStock)
 
   // ── Mínimo de gastos fijos desde LS_MINIMOS ─────────────────────────
   let minimoMensual: number | undefined = undefined
@@ -94,7 +99,7 @@ export default async function ResumenPage({
     }
   })
 
-  // ── Poblar anterior desde RES_Ventas_Mensual (datos 2025 no presentes en RAW_Ventas_Excel) ──
+  // ── Poblar anterior desde RES_Ventas_Mensual (datos 2025 no presentes en RAW_Ventas) ──
   const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
   ventasMensual.forEach(r => {
     const mesLabel = (r['Mes'] ?? r['MES'] ?? '').toLowerCase().trim()
@@ -266,7 +271,7 @@ export default async function ResumenPage({
   carteraRes.forEach(r => {
     const name = CARTERA_LEGACY[r['Bucket'] ?? ''] ?? r['Bucket'] ?? ''
     if (!name) return
-    bucketAggRes[name] = (bucketAggRes[name] ?? 0) + parseNum(r['Total Adeudado ($)'])
+    bucketAggRes[name] = (bucketAggRes[name] ?? 0) + parseNum(r['Saldo ($)'])
   })
 
   const totalCartera   = Object.values(bucketAggRes).reduce((s, v) => s + v, 0)

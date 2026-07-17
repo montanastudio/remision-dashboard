@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
 import { getPermissions, canAccess } from '@/lib/permissions'
 import { getSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
+import { computeSinRotar } from '@/lib/rotacion'
 import { fmt } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
 import Card from '@/components/Card'
@@ -27,18 +28,19 @@ export default async function InventarioPage({
 
   type Row = Record<string, string>
   let inventario: Row[] = []
-  let sinRotar: Row[] = []
   let conStock: Row[] = []
+  let movimientos: Row[] = []
 
-  try { inventario = rowsToObjects(await getSheetData('RAW_Inventario')) } catch (e) { console.error('[Inventario] RAW_Inventario:', e) }
-  try { sinRotar   = rowsToObjects(await getSheetData('RAW_Sin_Rotar'))  } catch (e) { console.error('[Inventario] RAW_Sin_Rotar:', e)   }
-  try { conStock   = rowsToObjects(await getSheetData('RAW_Inventario_Con_Stock')) } catch (e) { console.error('[Inventario] RAW_Inventario_Con_Stock:', e) }
+  try { inventario   = rowsToObjects(await getSheetData('RAW_Inventario')) } catch (e) { console.error('[Inventario] RAW_Inventario:', e) }
+  try { conStock      = rowsToObjects(await getSheetData('RAW_Inventario_Stock')) } catch (e) { console.error('[Inventario] RAW_Inventario_Stock:', e) }
+  try { movimientos   = rowsToObjects(await getSheetData('RAW_Movimientos')) } catch (e) { console.error('[Inventario] RAW_Movimientos:', e) }
 
   // Saldos físicos: usa la hoja nueva con bodegas si existe, si no cae a RAW_Inventario
   const saldosData = conStock.length > 0 ? conStock : inventario
+  const sinRotar   = computeSinRotar(movimientos, conStock.length > 0 ? conStock : inventario)
 
   // ── Sin Rotar ────────────────────────────────────────────────────────
-  const totalValor   = inventario.reduce((s, r) => s + parseNum(r['Vr. Existencia ($)']), 0)
+  const totalValor   = inventario.reduce((s, r) => s + parseNum(r['Valor a Precio Venta ($)']), 0)
   const valCritico   = sinRotar.filter(r => r['Estado'] === 'CRITICO').reduce((s, r) => s + parseNum(r['Vr. Existencia ($)']), 0)
   const valAlto      = sinRotar.filter(r => r['Estado'] === 'ALTO').reduce((s, r) => s + parseNum(r['Vr. Existencia ($)']), 0)
   const valMedio     = sinRotar.filter(r => r['Estado'] === 'MEDIO').reduce((s, r) => s + parseNum(r['Vr. Existencia ($)']), 0)
@@ -56,12 +58,13 @@ export default async function InventarioPage({
     (a, b) => parseNum(b['Días Sin Rotar']) - parseNum(a['Días Sin Rotar'])
   )
 
-  const lineaMap: Record<string, number> = {}
-  inventario.forEach((r) => {
-    const linea = r['Línea'] || 'Sin línea'
-    lineaMap[linea] = (lineaMap[linea] ?? 0) + parseNum(r['Vr. Existencia ($)'])
-  })
-  const lineas = Object.entries(lineaMap).sort((a, b) => b[1] - a[1]).slice(0, 8)
+  let resInventarioLinea: Row[] = []
+  try { resInventarioLinea = rowsToObjects(await getSheetData('RES_Inventario_Linea')) } catch (e) { console.error('[Inventario] RES_Inventario_Linea:', e) }
+
+  const lineas = resInventarioLinea
+    .map(r => [r['Línea'] || 'Sin línea', parseNum(r['Valor a Precio Venta ($)'])] as [string, number])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
   const maxLinea = lineas[0]?.[1] ?? 1
   const barLineas = lineas.map(([linea, val]) => ({
     label: linea,
@@ -80,13 +83,13 @@ export default async function InventarioPage({
       <TabsInventario activeTab={tab} />
 
       {/* Sin datos — aviso visible */}
-      {inventario.length === 0 && sinRotar.length === 0 && (
+      {inventario.length === 0 && conStock.length === 0 && (
         <div className="rounded-card border border-[var(--border)] bg-[var(--card)] shadow-card px-5 py-6 mb-4 text-center">
           <div className="text-[13px] font-semibold text-[var(--text)] mb-1">Sin datos de inventario</div>
           <div className="text-[12px] text-[var(--text-muted)] leading-relaxed">
             No se encontraron hojas{' '}
             <code className="px-1 py-0.5 rounded bg-[var(--bar-bg)] border border-[var(--border)] text-[11px]">RAW_Inventario</code> ni{' '}
-            <code className="px-1 py-0.5 rounded bg-[var(--bar-bg)] border border-[var(--border)] text-[11px]">RAW_Sin_Rotar</code>{' '}
+            <code className="px-1 py-0.5 rounded bg-[var(--bar-bg)] border border-[var(--border)] text-[11px]">RAW_Inventario_Stock</code>{' '}
             en el Google Sheet.
           </div>
         </div>

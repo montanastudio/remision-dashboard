@@ -39,7 +39,7 @@ export default async function VendedoresPage({
   const mesActualN = new Date().getMonth() + 1 // 1-12
 
   try {
-    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
+    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas')))
   } catch { /* empty */ }
   try {
     ventasMensual = rowsToObjects(await getSheetData('RES_Ventas_Mensual'))

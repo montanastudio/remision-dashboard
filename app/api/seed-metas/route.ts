@@ -27,7 +27,7 @@ export async function POST() {
   const añoAnterior = new Date().getFullYear() - 1
 
   const [vh, mt] = await Promise.all([
-    getSheetData('RAW_Ventas_Excel'),
+    getSheetData('RAW_Ventas'),
     getSheetData('LS METAS Y PROYECCION'),
   ])
   const ventasHistorico = normalizeVentasColumns(rowsToObjects(vh))

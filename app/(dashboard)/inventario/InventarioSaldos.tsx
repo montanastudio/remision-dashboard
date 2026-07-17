@@ -41,14 +41,15 @@ function extractSaldoCedi(r: Row): number {
   const key = Object.keys(r).find(k => k.toLowerCase().includes('cedi'))
   return key ? parseNum(r[key]) : 0
 }
+// "Otras bodegas": todo lo que no sea CEDI ni el total — Palmaseca, Ecomerce,
+// Reservas, FisicoZ4-9, etc. RAW_Inventario_Stock trae una columna "Stock *"
+// por bodega en vez de las 2 fijas (CEDI/Zona Franca) que había antes.
 function extractSaldoZF(r: Row): number {
   const exact = pickCol(r, 'Stock BODEGA ZONA FRANCA', 'Stock Bodega ZONA FRANCA', 'Saldo ZF', 'Zona Franca', 'ZF')
   if (exact !== '') return parseNum(exact)
-  const key = Object.keys(r).find(k => {
-    const l = k.toLowerCase()
-    return l.includes('zona') || l.includes('franca') || l === 'zf'
-  })
-  return key ? parseNum(r[key]) : 0
+  return Object.keys(r)
+    .filter(k => /^Stock /i.test(k) && !/^Stock Total$/i.test(k) && !k.toLowerCase().includes('cedi'))
+    .reduce((sum, k) => sum + parseNum(r[k]), 0)
 }
 function extractPrecio(r: Row): number {
   return parseNum(pickCol(r, 'Precio Venta ($)', 'Valor Venta ($)', 'Precio Venta', 'Precio', 'Vr. Unitario ($)', 'P. Venta'))
@@ -62,7 +63,7 @@ function extractValorTotal(r: Row): number {
 
 // ── Helpers de columnas renombradas ─────────────────────────────────────────
 function pickModelo(r: Record<string, string | number>): string {
-  return String(r['Modelo'] || r['Grupo'] || '').trim()
+  return String(r['Modelo'] || '').trim()
 }
 function pickDesc(r: Record<string, string | number>): string {
   return String(r['Descripción'] || r['Producto'] || '').trim()
@@ -134,7 +135,7 @@ function detectarMarca(r: Row): string {
 
 const BODEGA = {
   cedi: { label: 'CEDI',        color: '#3b82f6' },
-  zf:   { label: 'Zona Franca', color: '#f59e0b' },
+  zf:   { label: 'Otras Bodegas', color: '#f59e0b' },
 }
 
 const ESTADOS_ROTACION = [
@@ -567,7 +568,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
           <div>
             <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.zf.color }}>
               <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.zf.color }} />
-              Zona Franca
+              Otras Bodegas
             </div>
             <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.zf.color }}>
               {fmtN(kpiTotals.zfUnids)}
@@ -1042,7 +1043,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                                                 </div>
                                                 <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
                                                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.zf.color }} />
-                                                  <span className="text-[11px] text-[var(--text-sub)]">Zona Franca</span>
+                                                  <span className="text-[11px] text-[var(--text-sub)]">Otras Bodegas</span>
                                                   <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.zf.color }}>
                                                     {fmtN(it.zf)} und
                                                   </span>
@@ -1064,7 +1065,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                                 <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }} title="Bodega CEDI">
                                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />{fmtN(g.cedi)}
                                 </span>
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }} title="Zona Franca">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }} title="Otras Bodegas">
                                   <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />{fmtN(g.zf)}
                                 </span>
                               </div>
@@ -1113,7 +1114,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                   Stock<SortIcon k="Saldo Sistema" />
                   <div className="flex items-center justify-end gap-2 mt-0.5 font-normal normal-case tracking-normal">
                     <span style={{ color: BODEGA.cedi.color }}>CEDI</span>
-                    <span style={{ color: BODEGA.zf.color }}>ZF</span>
+                    <span style={{ color: BODEGA.zf.color }}>Otras</span>
                   </div>
                 </th>
 

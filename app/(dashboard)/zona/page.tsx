@@ -153,7 +153,7 @@ export default async function ZonaPage({
   let rawRows: Row[] = []
 
   try {
-    rawRows = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
+    rawRows = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas')))
   } catch {
     // empty
   }

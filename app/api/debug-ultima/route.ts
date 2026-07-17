@@ -16,7 +16,7 @@ export async function GET() {
     const sheets   = google.sheets({ version: 'v4', auth })
     const response = await sheets.spreadsheets.values.get({
       spreadsheetId: process.env.GOOGLE_SHEETS_ID!,
-      range: 'RAW_Ventas_Excel',
+      range: 'RAW_Ventas',
     })
     const rows = (response.data.values ?? []) as string[][]
     const headers  = rows[0] ?? []

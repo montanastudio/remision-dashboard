@@ -27,10 +27,17 @@ export default async function CarteraPage() {
   let cartera: Row[] = []
   try { cartera = rowsToObjects(await getSheetData('RAW_Cartera')) } catch { /* hoja no existe */ }
 
-  // Normalizar bucket en RAW_Cartera (legacy → nombres canónicos)
+  // Normalizar bucket (legacy → nombres canónicos) y remapear columnas de
+  // RAW_Cartera a los nombres que espera CarteraInteractivo (heredados de la
+  // hoja anterior): 'Días'→'Días Vencido', 'Fecha Vence'→'Fecha Vencimiento',
+  // 'Saldo ($)'→'Total Adeudado ($)', 'Estado'→'En Mora' (SI/NO).
   const carteraNorm: Row[] = cartera.map(r => ({
     ...r,
-    Bucket: LEGACY_TO_NAME[r['Bucket'] ?? ''] ?? r['Bucket'] ?? '',
+    Bucket:               LEGACY_TO_NAME[r['Bucket'] ?? ''] ?? r['Bucket'] ?? '',
+    'Días Vencido':       r['Días'] ?? r['Días Vencido'] ?? '',
+    'Fecha Vencimiento':  r['Fecha Vence'] ?? r['Fecha Vencimiento'] ?? '',
+    'Total Adeudado ($)': r['Saldo ($)'] ?? r['Total Adeudado ($)'] ?? '',
+    'En Mora':            (r['Estado'] ?? '').toUpperCase().includes('MORA') ? 'SI' : (r['En Mora'] ?? 'NO'),
   }))
 
   // Lista de vendedores únicos para el filtro

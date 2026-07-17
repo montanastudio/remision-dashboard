@@ -3,7 +3,7 @@ import { parseFecha } from '@/lib/sheets'
 
 export async function GET() {
   try {
-    const rows = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
+    const rows = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas')))
 
     let maxTs = 0
     let maxFechaStr = ''

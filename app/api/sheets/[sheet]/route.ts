@@ -4,10 +4,11 @@ import { authOptions } from '@/lib/auth'
 import { getSheetData, rowsToObjects, SheetName } from '@/lib/sheets'
 
 const VALID_SHEETS: SheetName[] = [
-  'RAW_Ventas_Excel',
+  'RAW_Ventas',
   'RAW_Cartera',
   'RAW_Inventario',
-  'RAW_Sin_Rotar',
+  'RAW_Inventario_Stock',
+  'RAW_Movimientos',
   'RES_Cartera_Buckets',
   'RES_Cartera_Mora',
   'RES_Inventario_Linea',

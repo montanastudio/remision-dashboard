@@ -22,7 +22,7 @@ export default async function VentasPage({
   let rawVentas: Row[] = []
 
   try {
-    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
+    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas')))
   } catch {
     // empty
   }

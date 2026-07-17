@@ -30,9 +30,9 @@ export async function POST() {
   // ── Leer ventas históricas ───────────────────────────────────────────
   let rawVentas: Record<string, string>[] = []
   try {
-    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas_Excel')))
+    rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas')))
   } catch {
-    return Response.json({ error: 'No se pudo leer RAW_Ventas_Excel' }, { status: 500 })
+    return Response.json({ error: 'No se pudo leer RAW_Ventas' }, { status: 500 })
   }
 
   // Detectar el año más reciente con datos completos (año anterior al máximo)

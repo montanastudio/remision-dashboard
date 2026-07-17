@@ -21,27 +21,31 @@ function getAuth(write = false) {
 }
 
 export type SheetName =
-  // Hojas actuales (RAW_ / RES_)
-  | 'RAW_Ventas_Excel'
-  | 'RAW_Cartera'
-  | 'RAW_Inventario'
-  | 'RAW_Sin_Rotar'
-  | 'RAW_Saldos_Fisicos'
-  | 'RES_Cartera_Buckets'
-  | 'RES_Cartera_Mora'
-  | 'RES_Inventario_Linea'
-  | 'RAW_Inventario_Con_Stock'
-  | 'RES_Inventario_Bodegas'
-  // Hojas de resúmenes procesados
+  // Ventas
   | 'RAW_Ventas'
+  | 'RAW_Ventas_Neto'
   | 'RAW_Ventas_2025'
-  | 'RAW_Ventas_Excel_Neto'
+  | 'RAW_Ventas_2026'
   | 'RES_Ventas_Mensual'
   | 'RES_Ventas_Mensual_2025'
+  | 'RES_Ventas_Mensual_2026'
   | 'RES_Ventas_Anual'
-  | 'RES_Excel_Por_Linea'
-  | 'RES_Excel_Por_Vendedor'
-  // Hojas de configuración (sin cambio)
+  | 'RES_Vendedores'
+  | 'RES_Top_Clientes'
+  // Cartera
+  | 'RAW_Cartera'
+  | 'RAW_Recibos'
+  | 'RES_Cartera_Buckets'
+  | 'RES_Cartera_Mora'
+  | 'RES_Cartera_Vendedor'
+  | 'RES_Cartera_Por_Vendedor'
+  // Inventario
+  | 'RAW_Inventario'
+  | 'RAW_Inventario_Stock'
+  | 'RAW_Movimientos'
+  | 'RES_Inventario_Linea'
+  | 'RES_Inventario_Bodegas'
+  // Hojas de configuración
   | 'LS_Usuarios'
   | 'LS_Permisos'
   | 'LS METAS Y PROYECCION'
@@ -153,44 +157,34 @@ export function parseNum(val: string | undefined): number {
 }
 
 /**
- * El Excel exporta fechas en MM/DD/YYYY (formato US) pero parseFecha espera DD/MM/YYYY.
- * Convierte "05/15/2026" → "15/05/2026".
- */
-function convertirFecha(val: string): string {
-  const parts = val.trim().split('/')
-  if (parts.length !== 3) return val
-  const [p0, p1, p2] = parts
-  const n0 = parseInt(p0, 10)
-  const n1 = parseInt(p1, 10)
-  // Si el segundo segmento (día en MM/DD) es > 12, es claramente MM/DD → invertir
-  // Si ambos son ≤ 12 también invertimos porque el Excel siempre exporta MM/DD
-  if (!isNaN(n0) && !isNaN(n1) && n0 >= 1 && n0 <= 12) {
-    return `${p1}/${p0}/${p2}`
-  }
-  return val
-}
-
-/**
- * Normaliza las columnas de RAW_Ventas_Excel al formato interno que usa el código.
- * Permite que todas las páginas usen los mismos nombres de campo (FECHA, VRTOTAL, etc.)
- * independientemente de cómo se llamen las columnas en el Excel fuente.
+ * Normaliza las columnas de RAW_Ventas (y variantes RAW_Ventas_Neto/2025/2026) al
+ * formato interno que usa el código. Permite que todas las páginas usen los mismos
+ * nombres de campo (FECHA, VRTOTAL, etc.) independientemente de cómo se llamen las
+ * columnas en la hoja fuente.
+ *
+ * VRTOTAL usa 'Vr. con IVA ($)': para ventas anteriores al 31/10/2025 es distinto de
+ * 'Vr. Neto ($)' (que incluye un 19% adicional); desde esa fecha ambas columnas son
+ * idénticas porque ya no se desglosa IVA por línea.
+ *
+ * Las fechas de estas hojas ya vienen en DD/MM/YYYY (a diferencia de la extinta
+ * RAW_Ventas_Excel, que exportaba MM/DD/YYYY) — no requieren conversión.
  */
 export function normalizeVentasColumns(rows: Record<string, string>[]): Record<string, string>[] {
   return rows.map(r => ({
-    FECHA:      convertirFecha(r['Fecha'] ?? r['FECHA'] ?? ''),
-    VRTOTAL:    r['Vr. Total ($)'] ?? r['VRTOTAL']      ?? '',
-    CANTIDAD:   r['Cantidad']     ?? r['CANTIDAD']      ?? '',
-    NVENDEDOR:  r['Vendedor']     ?? r['NVENDEDOR']     ?? '',
-    REFERENCIA: r['Referencia']   ?? r['REFERENCIA']    ?? '',
-    CODIGO:     r['Codigo']       ?? r['CODIGO']        ?? '',
-    PRODUCTO:   r['Producto']     ?? r['PRODUCTO']      ?? '',
-    NGRUPO:     r['Grupo/Marca']  ?? r['NGRUPO']        ?? '',
-    LINEA:      r['Linea']        ?? r['LINEA']         ?? '',
-    IDCLIENTE:  r['NIT']          ?? r['IDCLIENTE']     ?? '',
-    NCLIENTE:   r['Cliente']      ?? r['NCLIENTE']      ?? '',
-    CIUDAD:     r['Ciudad']       ?? r['CIUDAD']        ?? '',
-    COSTO:      r['Costo ($)']    ?? r['COSTO']         ?? '',
-    FACTURA:    r['Factura']      ?? r['FACTURA']       ?? '',
+    FECHA:      r['Fecha']          ?? r['FECHA']      ?? '',
+    VRTOTAL:    r['Vr. con IVA ($)'] ?? r['Vr. Total ($)'] ?? r['VRTOTAL'] ?? '',
+    CANTIDAD:   r['Cantidad']       ?? r['CANTIDAD']   ?? '',
+    NVENDEDOR:  r['Vendedor']       ?? r['NVENDEDOR']  ?? '',
+    REFERENCIA: r['Referencia']     ?? r['REFERENCIA'] ?? '',
+    CODIGO:     r['Código']         ?? r['Codigo']      ?? r['CODIGO'] ?? '',
+    PRODUCTO:   r['Producto']       ?? r['PRODUCTO']   ?? '',
+    NGRUPO:     r['Grupo/Marca']    ?? r['NGRUPO']      ?? '',
+    LINEA:      r['Línea']          ?? r['Linea']       ?? r['LINEA'] ?? '',
+    IDCLIENTE:  r['NIT']            ?? r['IDCLIENTE']   ?? '',
+    NCLIENTE:   r['Cliente']        ?? r['NCLIENTE']    ?? '',
+    CIUDAD:     r['Ciudad']         ?? r['CIUDAD']      ?? '',
+    COSTO:      r['Costo ($)']      ?? r['COSTO']       ?? '',
+    FACTURA:    r['Factura']        ?? r['FACTURA']     ?? '',
   }))
 }
 
