@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { fmt, fmtN } from '@/lib/format'
 
 function parseNum(v: unknown): number {
@@ -14,16 +15,19 @@ function parseNum(v: unknown): number {
 
 type Row = Record<string, string>
 type EnrichedRow = {
-  [k: string]: string | number
+  [k: string]: string | number | Record<string, number>
   _marca: string
   _saldo: number
   _precio: number
   _valorTotal: number
-  _saldoCedi: number
-  _saldoZF: number
+  _bodegas: Record<string, number>
   _dias: number
   _ultimaSalida: string
   _rotEstado: string
+}
+
+function mergeInto(target: Record<string, number>, source: Record<string, number>) {
+  Object.entries(source).forEach(([k, v]) => { target[k] = (target[k] ?? 0) + v })
 }
 
 // ── Extracción flexible de columnas ──────────────────────────────────────────
@@ -35,21 +39,29 @@ function pickCol(r: Row, ...candidates: string[]): string {
 function extractSaldo(r: Row): number {
   return parseNum(pickCol(r, 'Stock Total', 'Saldo Sistema', 'Saldo', 'Existencias', 'Cantidad', 'Saldo (und)', 'Und. Stock'))
 }
-function extractSaldoCedi(r: Row): number {
-  const exact = pickCol(r, 'Stock BODEGA CEDI', 'Stock Bodega CEDI', 'Saldo CEDI', 'CEDI')
-  if (exact !== '') return parseNum(exact)
-  const key = Object.keys(r).find(k => k.toLowerCase().includes('cedi'))
-  return key ? parseNum(r[key]) : 0
+// Etiquetas de bodega conocidas; cualquier "Stock *" nueva que aparezca en el
+// sheet (ej. si se activa una FISICOZ) se etiqueta genéricamente sin romper.
+const BODEGA_LABEL_OVERRIDES: Record<string, string> = {
+  CEDI: 'CEDI',
+  PALMASECA: 'Palmaseca',
+  ECOMERCE: 'Ecomerce',
+  RESERVAS: 'Reservas',
 }
-// "Otras bodegas": todo lo que no sea CEDI ni el total — Palmaseca, Ecomerce,
-// Reservas, FisicoZ4-9, etc. RAW_Inventario_Stock trae una columna "Stock *"
-// por bodega en vez de las 2 fijas (CEDI/Zona Franca) que había antes.
-function extractSaldoZF(r: Row): number {
-  const exact = pickCol(r, 'Stock BODEGA ZONA FRANCA', 'Stock Bodega ZONA FRANCA', 'Saldo ZF', 'Zona Franca', 'ZF')
-  if (exact !== '') return parseNum(exact)
-  return Object.keys(r)
-    .filter(k => /^Stock /i.test(k) && !/^Stock Total$/i.test(k) && !k.toLowerCase().includes('cedi'))
-    .reduce((sum, k) => sum + parseNum(r[k]), 0)
+function bodegaLabel(col: string): string {
+  const key = col.replace(/^Stock\s+/i, '').replace(/^BODEGA\s+/i, '').trim().toUpperCase()
+  if (BODEGA_LABEL_OVERRIDES[key]) return BODEGA_LABEL_OVERRIDES[key]
+  return key.charAt(0) + key.slice(1).toLowerCase()
+}
+// Una columna "Stock *" por bodega (CEDI, Palmaseca, Ecomerce, Reservas,
+// FisicoZ4-9...) en vez de las 2 fijas (CEDI/Zona Franca) que había antes.
+function extractBodegas(r: Row): Record<string, number> {
+  const out: Record<string, number> = {}
+  Object.keys(r).forEach(k => {
+    if (!/^Stock /i.test(k) || /^Stock Total$/i.test(k)) return
+    const label = bodegaLabel(k)
+    out[label] = (out[label] ?? 0) + parseNum(r[k])
+  })
+  return out
 }
 function extractPrecio(r: Row): number {
   return parseNum(pickCol(r, 'Precio Venta ($)', 'Valor Venta ($)', 'Precio Venta', 'Precio', 'Vr. Unitario ($)', 'P. Venta'))
@@ -62,10 +74,10 @@ function extractValorTotal(r: Row): number {
 }
 
 // ── Helpers de columnas renombradas ─────────────────────────────────────────
-function pickModelo(r: Record<string, string | number>): string {
+function pickModelo(r: Record<string, unknown>): string {
   return String(r['Modelo'] || '').trim()
 }
-function pickDesc(r: Record<string, string | number>): string {
+function pickDesc(r: Record<string, unknown>): string {
   return String(r['Descripción'] || r['Producto'] || '').trim()
 }
 
@@ -81,7 +93,7 @@ const CURVAS_CONOCIDAS = ['M', 'L', 'Y', 'C', 'B'] as const
 const CURVA_COLOR: Record<string, string> = { M: '#3b82f6', L: '#22c55e', Y: '#f59e0b', C: '#a855f7', B: '#ec4899' }
 const CURVA_LABEL: Record<string, string> = { M: 'M', L: 'L', Y: 'Y', C: 'C', B: 'Baby' }
 
-function detectarCurva(r: Row | Record<string, string | number>): string {
+function detectarCurva(r: Row | Record<string, unknown>): string {
   const col = String(r['Curva'] ?? '').trim().toUpperCase()
   if ((CURVAS_CONOCIDAS as readonly string[]).includes(col)) return col
   const desc = pickDesc(r as Row).toUpperCase()
@@ -133,10 +145,7 @@ function detectarMarca(r: Row): string {
   return 'Otros'
 }
 
-const BODEGA = {
-  cedi: { label: 'CEDI',        color: '#3b82f6' },
-  zf:   { label: 'Otras Bodegas', color: '#f59e0b' },
-}
+const BODEGA_PALETTE = ['#3b82f6', '#f59e0b', '#a855f7', '#22c55e', '#ef4444', '#06b6d4', '#ec4899', '#84cc16', '#f97316', '#6366f1']
 
 const ESTADOS_ROTACION = [
   { estado: 'Activo',  label: 'Activo',  color: '#22c55e' },
@@ -169,17 +178,36 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const [legendOpen,   setLegendOpen]   = useState(false)
   const [rotPopup,     setRotPopup]     = useState(false)
   const [rotPopupPos,  setRotPopupPos]  = useState<{ top: number; right: number } | null>(null)
+  const [hiddenCols,   setHiddenCols]   = useState<Set<string>>(new Set(['Descripción', 'Marca', 'Rotación']))
+  const [stockPopupRow, setStockPopupRow] = useState<EnrichedRow | null>(null)
+  const [stockPopupPos, setStockPopupPos] = useState<{ top: number; left: number } | null>(null)
+
+  function toggleCol(col: string) {
+    setHiddenCols(prev => {
+      const next = new Set(prev)
+      if (next.has(col)) next.delete(col); else next.add(col)
+      return next
+    })
+  }
   const legendRef = useRef<HTMLDivElement>(null)
   const rotRef    = useRef<HTMLDivElement>(null)
+  const stockPopupRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function onOutside(e: MouseEvent) {
       if (legendRef.current && !legendRef.current.contains(e.target as Node)) setLegendOpen(false)
       if (rotRef.current    && !rotRef.current.contains(e.target as Node))    setRotPopup(false)
+      if (stockPopupRef.current && !stockPopupRef.current.contains(e.target as Node)) setStockPopupRow(null)
     }
     document.addEventListener('mousedown', onOutside)
     return () => document.removeEventListener('mousedown', onOutside)
   }, [])
+
+  function openStockPopup(e: React.MouseEvent, r: EnrichedRow) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    setStockPopupPos({ top: rect.top - 8, left: rect.left + rect.width / 2 })
+    setStockPopupRow(r)
+  }
 
   function openRotPopup(e: React.MouseEvent<HTMLButtonElement>) {
     e.stopPropagation()
@@ -213,8 +241,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       _marca:        detectarMarca(r),
       _saldo:        extractSaldo(r),
       _precio:       extractPrecio(r),
-      _saldoCedi:    extractSaldoCedi(r),
-      _saldoZF:      extractSaldoZF(r),
+      _bodegas:      extractBodegas(r),
       _dias:         rot ? rot.dias : 0,
       _ultimaSalida: rot ? rot.ultimaSalida : '',
       _rotEstado:    rot ? rot.estado : 'Activo',
@@ -223,6 +250,29 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   }), [saldos, rotMap])
 
   const totalSKUs = enriched.length
+
+  // ── Bodegas activas (con stock > 0 en todo el dataset) — orden y color estables ──
+  const bodegasActivas = useMemo(() => {
+    const totales: Record<string, number> = {}
+    enriched.forEach(r => mergeInto(totales, r._bodegas))
+    return Object.entries(totales)
+      .filter(([, qty]) => qty > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([label], i) => ({ label, color: BODEGA_PALETTE[i % BODEGA_PALETTE.length] }))
+  }, [enriched])
+
+  // Al cargar, todas las columnas de bodega arrancan ocultas (solo Stock Total
+  // visible) — se seedean una sola vez apenas se conoce la lista de bodegas.
+  const bodegasSeeded = useRef(false)
+  useEffect(() => {
+    if (bodegasSeeded.current || bodegasActivas.length === 0) return
+    bodegasSeeded.current = true
+    setHiddenCols(prev => {
+      const next = new Set(prev)
+      bodegasActivas.forEach(b => next.add(b.label))
+      return next
+    })
+  }, [bodegasActivas])
 
   // ── Rango de pares (slider) ────────────────────────────────────────────────
   const maxSaldo = useMemo(
@@ -301,25 +351,23 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
     return CURVAS_CONOCIDAS.filter(c => set.has(c))
   }, [enriched, modeloFilter])
 
-  const totalsPorCurva = useMemo<Record<string, { qty: number; valor: number; cedi: number; zf: number }>>(() => {
+  const totalsPorCurva = useMemo<Record<string, { qty: number; valor: number; bodegas: Record<string, number> }>>(() => {
     if (!modeloFilter) return {}
-    const map: Record<string, { qty: number; valor: number; cedi: number; zf: number }> = {
-      _total: { qty: 0, valor: 0, cedi: 0, zf: 0 },
+    const map: Record<string, { qty: number; valor: number; bodegas: Record<string, number> }> = {
+      _total: { qty: 0, valor: 0, bodegas: {} },
     }
     enriched
       .filter(r => pickModelo(r) === modeloFilter)
       .filter(r => inRango(r._saldo))
       .forEach(r => {
         const c = detectarCurva(r) || '_sin_curva'
-        if (!map[c]) map[c] = { qty: 0, valor: 0, cedi: 0, zf: 0 }
+        if (!map[c]) map[c] = { qty: 0, valor: 0, bodegas: {} }
         map[c].qty   += r._saldo
         map[c].valor += r._valorTotal
-        map[c].cedi  += r._saldoCedi
-        map[c].zf    += r._saldoZF
+        mergeInto(map[c].bodegas, r._bodegas)
         map['_total'].qty   += r._saldo
         map['_total'].valor += r._valorTotal
-        map['_total'].cedi  += r._saldoCedi
-        map['_total'].zf    += r._saldoZF
+        mergeInto(map['_total'].bodegas, r._bodegas)
       })
     return map
   }, [enriched, modeloFilter, inRango])
@@ -376,9 +424,9 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   // click extra, porque su única variación entre referencias es la curva.
   const refGroups = useMemo(() => {
     const map: Record<string, {
-      base: string; marca: string; qty: number; valor: number; cedi: number; zf: number
-      curvas: Record<string, { curva: string; qty: number; valor: number; cedi: number; zf: number
-        items: Record<string, { ref: string; qty: number; cedi: number; zf: number }> }>
+      base: string; marca: string; qty: number; valor: number; bodegas: Record<string, number>
+      curvas: Record<string, { curva: string; qty: number; valor: number; bodegas: Record<string, number>
+        items: Record<string, { ref: string; qty: number; bodegas: Record<string, number> }> }>
     }> = {}
     rows.forEach(r => {
       const ref = str(r, 'Referencia') || 'Sin referencia'
@@ -387,16 +435,15 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
       const mCurva = stem.match(/^(.*\d)([MLYCB])$/)
       const base   = mCurva ? mCurva[1] : stem
       const curva  = mCurva ? mCurva[2] : (detectarCurva(r) || '—')
-      if (!map[base]) map[base] = { base, marca: r._marca, qty: 0, valor: 0, cedi: 0, zf: 0, curvas: {} }
+      if (!map[base]) map[base] = { base, marca: r._marca, qty: 0, valor: 0, bodegas: {}, curvas: {} }
       const g = map[base]
-      g.qty += r._saldo; g.valor += r._valorTotal; g.cedi += r._saldoCedi; g.zf += r._saldoZF
-      if (!g.curvas[curva]) g.curvas[curva] = { curva, qty: 0, valor: 0, cedi: 0, zf: 0, items: {} }
+      g.qty += r._saldo; g.valor += r._valorTotal; mergeInto(g.bodegas, r._bodegas)
+      if (!g.curvas[curva]) g.curvas[curva] = { curva, qty: 0, valor: 0, bodegas: {}, items: {} }
       const cg = g.curvas[curva]
-      cg.qty += r._saldo; cg.valor += r._valorTotal; cg.cedi += r._saldoCedi; cg.zf += r._saldoZF
-      if (!cg.items[ref]) cg.items[ref] = { ref, qty: 0, cedi: 0, zf: 0 }
-      cg.items[ref].qty  += r._saldo
-      cg.items[ref].cedi += r._saldoCedi
-      cg.items[ref].zf   += r._saldoZF
+      cg.qty += r._saldo; cg.valor += r._valorTotal; mergeInto(cg.bodegas, r._bodegas)
+      if (!cg.items[ref]) cg.items[ref] = { ref, qty: 0, bodegas: {} }
+      cg.items[ref].qty += r._saldo
+      mergeInto(cg.items[ref].bodegas, r._bodegas)
     })
     const curvaOrden = (c: string) => {
       const i = (CURVAS_CONOCIDAS as readonly string[]).indexOf(c)
@@ -466,15 +513,20 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
   const kpiTotals = useMemo(() => {
     const totalUnids = rows.reduce((s, r) => s + r._saldo, 0)
     const totalValor = rows.reduce((s, r) => s + r._valorTotal, 0)
-    const cediUnids  = rows.reduce((s, r) => s + r._saldoCedi, 0)
-    const zfUnids    = rows.reduce((s, r) => s + r._saldoZF, 0)
-    const cediValor  = rows.reduce((s, r) => s + r._valorTotal * (r._saldo > 0 ? r._saldoCedi / r._saldo : 0), 0)
-    const zfValor    = rows.reduce((s, r) => s + r._valorTotal * (r._saldo > 0 ? r._saldoZF   / r._saldo : 0), 0)
-    return { totalSKUs: rows.length, totalUnids, totalValor, cediUnids, zfUnids, cediValor, zfValor }
-  }, [rows])
+    const porBodega: Record<string, { unids: number; valor: number }> = {}
+    bodegasActivas.forEach(b => { porBodega[b.label] = { unids: 0, valor: 0 } })
+    rows.forEach(r => {
+      Object.entries(r._bodegas).forEach(([label, qty]) => {
+        if (!porBodega[label]) porBodega[label] = { unids: 0, valor: 0 }
+        porBodega[label].unids += qty
+        porBodega[label].valor += r._valorTotal * (r._saldo > 0 ? qty / r._saldo : 0)
+      })
+    })
+    return { totalSKUs: rows.length, totalUnids, totalValor, porBodega }
+  }, [rows, bodegasActivas])
 
-  const cediPct = kpiTotals.totalUnids > 0 ? (kpiTotals.cediUnids / kpiTotals.totalUnids) * 100 : 0
-  const zfPct   = kpiTotals.totalUnids > 0 ? (kpiTotals.zfUnids   / kpiTotals.totalUnids) * 100 : 0
+  const bodegaPct = (label: string) =>
+    kpiTotals.totalUnids > 0 ? ((kpiTotals.porBodega[label]?.unids ?? 0) / kpiTotals.totalUnids) * 100 : 0
 
   function resetAcordeones() {
     setSelectedBase(null)
@@ -553,34 +605,29 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
             <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.totalValor)}</div>
           </div>
 
-          <div>
-            <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.cedi.color }}>
-              <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.cedi.color }} />
-              CEDI
-            </div>
-            <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.cedi.color }}>
-              {fmtN(kpiTotals.cediUnids)}
-              <span className="text-[10px] font-normal ml-1">· {Math.round(cediPct)}%</span>
-            </div>
-            <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.cediValor)}</div>
-          </div>
-
-          <div>
-            <div className="text-[10px] font-semibold leading-tight" style={{ color: BODEGA.zf.color }}>
-              <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: BODEGA.zf.color }} />
-              Otras Bodegas
-            </div>
-            <div className="text-[15px] font-bold num leading-tight" style={{ color: BODEGA.zf.color }}>
-              {fmtN(kpiTotals.zfUnids)}
-              <span className="text-[10px] font-normal ml-1">· {Math.round(zfPct)}%</span>
-            </div>
-            <div className="text-[10px] text-[var(--text-muted)] num">{fmt(kpiTotals.zfValor)}</div>
-          </div>
+          {bodegasActivas.map(b => {
+            const pct = bodegaPct(b.label)
+            const b1  = kpiTotals.porBodega[b.label] ?? { unids: 0, valor: 0 }
+            return (
+              <div key={b.label}>
+                <div className="text-[10px] font-semibold leading-tight" style={{ color: b.color }}>
+                  <span className="inline-block w-[7px] h-[7px] rounded-full mr-1" style={{ background: b.color }} />
+                  {b.label}
+                </div>
+                <div className="text-[15px] font-bold num leading-tight" style={{ color: b.color }}>
+                  {fmtN(b1.unids)}
+                  <span className="text-[10px] font-normal ml-1">· {Math.round(pct)}%</span>
+                </div>
+                <div className="text-[10px] text-[var(--text-muted)] num">{fmt(b1.valor)}</div>
+              </div>
+            )
+          })}
 
           <div className="flex-1 min-w-[110px]">
             <div className="h-[6px] rounded-full overflow-hidden flex bg-[var(--border)]">
-              <div className="h-full transition-all duration-500" style={{ width: `${cediPct}%`, background: BODEGA.cedi.color }} />
-              <div className="h-full transition-all duration-500" style={{ width: `${zfPct}%`,   background: BODEGA.zf.color }} />
+              {bodegasActivas.map(b => (
+                <div key={b.label} className="h-full transition-all duration-500" style={{ width: `${bodegaPct(b.label)}%`, background: b.color }} />
+              ))}
             </div>
             {hayFiltros && (
               <button
@@ -833,7 +880,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
               style={{ gridTemplateColumns: `repeat(${curvasDelModelo.length + 1}, 1fr)` }}>
               {curvasDelModelo.map(c => {
                 const color = CURVA_COLOR[c] ?? '#94a3b8'
-                const t = totalsPorCurva[c] ?? { qty: 0, valor: 0, cedi: 0, zf: 0 }
+                const t = totalsPorCurva[c] ?? { qty: 0, valor: 0, bodegas: {} }
                 const pct = totalsPorCurva['_total']?.qty ? Math.round((t.qty / totalsPorCurva['_total'].qty) * 100) : 0
                 return (
                   <button key={c} onClick={() => setCurvaFilter(curvaFilter === c ? null : c)}
@@ -844,14 +891,12 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                     </div>
                     <div className="text-[18px] font-bold num text-[var(--text)] leading-tight">{fmtN(t.qty)}</div>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />
-                        {fmtN(t.cedi)}
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }}>
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />
-                        {fmtN(t.zf)}
-                      </span>
+                      {bodegasActivas.map(b => (
+                        <span key={b.label} className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: b.color }}>
+                          <span className="w-1.5 h-1.5 rounded-full" style={{ background: b.color }} />
+                          {fmtN(t.bodegas[b.label] ?? 0)}
+                        </span>
+                      ))}
                     </div>
                     <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{fmt(t.valor)}</div>
                     <div className="mt-1.5 h-[3px] bg-[var(--border)] rounded-full overflow-hidden">
@@ -867,14 +912,12 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                   {fmtN(totalsPorCurva['_total']?.qty ?? 0)}
                 </div>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }}>
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />
-                    {fmtN(totalsPorCurva['_total']?.cedi ?? 0)}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }}>
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />
-                    {fmtN(totalsPorCurva['_total']?.zf ?? 0)}
-                  </span>
+                  {bodegasActivas.map(b => (
+                    <span key={b.label} className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: b.color }}>
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: b.color }} />
+                      {fmtN(totalsPorCurva['_total']?.bodegas[b.label] ?? 0)}
+                    </span>
+                  ))}
                 </div>
                 <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
                   {fmt(totalsPorCurva['_total']?.valor ?? 0)}
@@ -1034,20 +1077,15 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                                             {/* Nivel 4 — listado de bodegas */}
                                             {refOpen && (
                                               <div className="pb-2 pt-0.5 pl-8 pr-1 space-y-1 fade-in-up">
-                                                <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
-                                                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.cedi.color }} />
-                                                  <span className="text-[11px] text-[var(--text-sub)]">Bodega CEDI</span>
-                                                  <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.cedi.color }}>
-                                                    {fmtN(it.cedi)} und
-                                                  </span>
-                                                </div>
-                                                <div className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
-                                                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: BODEGA.zf.color }} />
-                                                  <span className="text-[11px] text-[var(--text-sub)]">Otras Bodegas</span>
-                                                  <span className="ml-auto text-[12px] font-semibold num" style={{ color: BODEGA.zf.color }}>
-                                                    {fmtN(it.zf)} und
-                                                  </span>
-                                                </div>
+                                                {bodegasActivas.map(b => (
+                                                  <div key={b.label} className="flex items-center gap-2 px-2.5 py-[6px] rounded-[8px] bg-[var(--bar-bg)]">
+                                                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
+                                                    <span className="text-[11px] text-[var(--text-sub)]">{b.label}</span>
+                                                    <span className="ml-auto text-[12px] font-semibold num" style={{ color: b.color }}>
+                                                      {fmtN(it.bodegas[b.label] ?? 0)} und
+                                                    </span>
+                                                  </div>
+                                                ))}
                                               </div>
                                             )}
                                           </div>
@@ -1061,13 +1099,12 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
 
                             {/* Pie de la referencia: split bodegas + valor */}
                             <div className="flex items-center justify-between pt-2">
-                              <div className="flex items-center gap-2.5">
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.cedi.color }} title="Bodega CEDI">
-                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.cedi.color }} />{fmtN(g.cedi)}
-                                </span>
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: BODEGA.zf.color }} title="Otras Bodegas">
-                                  <span className="w-1.5 h-1.5 rounded-full" style={{ background: BODEGA.zf.color }} />{fmtN(g.zf)}
-                                </span>
+                              <div className="flex items-center gap-2.5 flex-wrap">
+                                {bodegasActivas.map(b => (
+                                  <span key={b.label} className="inline-flex items-center gap-1 text-[10px] font-medium" style={{ color: b.color }} title={b.label}>
+                                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: b.color }} />{fmtN(g.bodegas[b.label] ?? 0)}
+                                  </span>
+                                ))}
                               </div>
                               <span className="text-[10px] text-[var(--text-muted)] num">{fmt(g.valor)}</span>
                             </div>
@@ -1092,6 +1129,66 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
           {query        ? ` · "${query}"`                  : ''}
         </div>
 
+        {/* Columnas ocultables */}
+        <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+          <span className="text-[10px] text-[var(--text-muted)] mr-0.5">Columnas:</span>
+          <button
+            onClick={() => toggleCol('Marca')}
+            className={`text-[10px] font-medium px-2 py-[3px] rounded-full border transition-all leading-none ${
+              hiddenCols.has('Marca')
+                ? 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--nav-hover)]'
+                : 'bg-[var(--text-sub)] border-[var(--text-sub)] text-[var(--card)]'
+            }`}
+          >
+            Marca
+          </button>
+          <button
+            onClick={() => toggleCol('Descripción')}
+            className={`text-[10px] font-medium px-2 py-[3px] rounded-full border transition-all leading-none ${
+              hiddenCols.has('Descripción')
+                ? 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--nav-hover)]'
+                : 'bg-[var(--text-sub)] border-[var(--text-sub)] text-[var(--card)]'
+            }`}
+          >
+            Descripción
+          </button>
+          <button
+            onClick={() => toggleCol('Rotación')}
+            className={`text-[10px] font-medium px-2 py-[3px] rounded-full border transition-all leading-none ${
+              hiddenCols.has('Rotación')
+                ? 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--nav-hover)]'
+                : 'bg-[var(--text-sub)] border-[var(--text-sub)] text-[var(--card)]'
+            }`}
+          >
+            Rotación
+          </button>
+          <button
+            onClick={() => toggleCol('Stock Total')}
+            className={`text-[10px] font-medium px-2 py-[3px] rounded-full border transition-all leading-none ${
+              hiddenCols.has('Stock Total')
+                ? 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--nav-hover)]'
+                : 'bg-[var(--text-sub)] border-[var(--text-sub)] text-[var(--card)]'
+            }`}
+          >
+            Stock Total
+          </button>
+          {bodegasActivas.map(b => {
+            const hidden = hiddenCols.has(b.label)
+            return (
+              <button
+                key={b.label}
+                onClick={() => toggleCol(b.label)}
+                className="text-[10px] font-medium px-2 py-[3px] rounded-full border transition-all leading-none"
+                style={hidden
+                  ? { background: 'transparent', borderColor: 'var(--border)', color: 'var(--text-muted)' }
+                  : { background: b.color, borderColor: b.color, color: '#fff' }}
+              >
+                {b.label}
+              </button>
+            )
+          })}
+        </div>
+
         {/* Tabla de detalle */}
         <div className="table-scroll" style={{ maxHeight: 420 }}>
           <table className="w-full border-collapse text-[12px]">
@@ -1099,38 +1196,46 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
               <tr>
                 {([
                   { key: 'Marca',       label: 'Marca' },
-                  { key: 'Referencia',  label: 'Referencia' },
                   { key: 'Modelo',      label: 'Modelo' },
+                  { key: 'Referencia',  label: 'Referencia' },
                   { key: 'Descripción', label: 'Descripción' },
-                ] as { key: SortKey; label: string }[]).map(col => (
+                ] as { key: SortKey; label: string }[]).filter(col => !hiddenCols.has(col.key)).map(col => (
                   <th key={col.key} onClick={() => toggleSort(col.key)}
                     className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-left">
                     {col.label}<SortIcon k={col.key} />
                   </th>
                 ))}
 
-                <th onClick={() => toggleSort('Saldo Sistema')}
-                  className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-right">
-                  Stock<SortIcon k="Saldo Sistema" />
-                  <div className="flex items-center justify-end gap-2 mt-0.5 font-normal normal-case tracking-normal">
-                    <span style={{ color: BODEGA.cedi.color }}>CEDI</span>
-                    <span style={{ color: BODEGA.zf.color }}>Otras</span>
-                  </div>
-                </th>
+                {!hiddenCols.has('Stock Total') && (
+                  <th onClick={() => toggleSort('Saldo Sistema')}
+                    className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] cursor-pointer select-none hover:text-[var(--text)] whitespace-nowrap text-right">
+                    Stock Total<SortIcon k="Saldo Sistema" />
+                  </th>
+                )}
 
-                <th className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] text-right whitespace-nowrap">
-                  <div className="flex items-center justify-end gap-1.5">
-                    <button onClick={() => toggleSort('Rotación')} className="cursor-pointer select-none hover:text-[var(--text)]">
-                      Rotación<SortIcon k="Rotación" />
-                    </button>
-                    <div ref={rotRef}>
-                      <button onClick={openRotPopup}
-                        className="w-[15px] h-[15px] rounded-full border border-[var(--border)] text-[9px] font-bold text-[var(--text-muted)] hover:border-[var(--text-sub)] hover:text-[var(--text)] transition-colors flex items-center justify-center leading-none flex-shrink-0">
-                        ?
+                {bodegasActivas.filter(b => !hiddenCols.has(b.label)).map(b => (
+                  <th key={b.label}
+                    className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] border-b border-[var(--border)] whitespace-nowrap text-right"
+                    style={{ color: b.color }}>
+                    {b.label}
+                  </th>
+                ))}
+
+                {!hiddenCols.has('Rotación') && (
+                  <th className="px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] text-right whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button onClick={() => toggleSort('Rotación')} className="cursor-pointer select-none hover:text-[var(--text)]">
+                        Rotación<SortIcon k="Rotación" />
                       </button>
+                      <div ref={rotRef}>
+                        <button onClick={openRotPopup}
+                          className="w-[15px] h-[15px] rounded-full border border-[var(--border)] text-[9px] font-bold text-[var(--text-muted)] hover:border-[var(--text-sub)] hover:text-[var(--text)] transition-colors flex items-center justify-center leading-none flex-shrink-0">
+                          ?
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </th>
+                  </th>
+                )}
 
                 {([
                   { key: 'Valor Venta ($)', label: 'Valor Unit.' },
@@ -1149,45 +1254,59 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
                 const color = MARCA_COLOR[marca] ?? '#94a3b8'
                 return (
                   <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
-                    <td className="px-[10px] py-[9px]">
-                      <button onClick={() => handleMarcaClick(marca)} className="flex items-center gap-1.5 group">
-                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
-                        <span className="text-[11px] text-[var(--text-muted)] group-hover:text-[var(--text)] transition-colors">{marca}</span>
-                      </button>
-                    </td>
-                    <td className="px-[10px] py-[9px] text-[var(--text-sub)] num text-[11px]">{str(r, 'Referencia')}</td>
-                    <td className="px-[10px] py-[9px]">
-                      <button onClick={() => handleModeloClick(pickModelo(r))} className="font-medium text-[var(--text)] hover:underline text-left">
+                    {!hiddenCols.has('Marca') && (
+                      <td className="px-[10px] py-[9px]">
+                        <button onClick={() => handleMarcaClick(marca)} className="flex items-center gap-1.5 group">
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: color }} />
+                          <span className="text-[11px] text-[var(--text-muted)] group-hover:text-[var(--text)] transition-colors">{marca}</span>
+                        </button>
+                      </td>
+                    )}
+                    <td className="px-[10px] py-[9px] max-w-[160px]">
+                      <button onClick={() => handleModeloClick(pickModelo(r))} className="font-medium text-[var(--text)] hover:underline text-left truncate block max-w-full">
                         {pickModelo(r)}
                       </button>
                     </td>
-                    <td className="px-[10px] py-[9px] text-[var(--text-sub)] max-w-[200px] truncate">{pickDesc(r)}</td>
+                    <td className="px-[10px] py-[9px] text-[var(--text-sub)] num text-[11px]">{str(r, 'Referencia')}</td>
+                    {!hiddenCols.has('Descripción') && (
+                      <td className="px-[10px] py-[9px] text-[var(--text-sub)] max-w-[200px] truncate">{pickDesc(r)}</td>
+                    )}
 
-                    <td className="px-[10px] py-[9px] text-right">
-                      <div className="text-[11px] font-semibold text-[var(--text)] num">{fmtN(r._saldo)}</div>
-                      {(r._saldoCedi > 0 || r._saldoZF > 0) && (
-                        <div className="flex items-center justify-end gap-2 mt-0.5">
-                          <span className="text-[9px] num" style={{ color: BODEGA.cedi.color }}>{fmtN(r._saldoCedi)}</span>
-                          <span className="text-[9px] num" style={{ color: BODEGA.zf.color }}>{fmtN(r._saldoZF)}</span>
-                        </div>
-                      )}
-                    </td>
+                    {!hiddenCols.has('Stock Total') && (
+                      <td className="px-[10px] py-[9px] text-right">
+                        <span
+                          onMouseEnter={(e) => openStockPopup(e, r)}
+                          onMouseLeave={() => setStockPopupRow(null)}
+                          className="text-[11px] font-semibold text-[var(--text)] num cursor-help border-b border-dotted border-[var(--text-muted)]"
+                        >
+                          {fmtN(r._saldo)}
+                        </span>
+                      </td>
+                    )}
 
-                    <td className="px-[10px] py-[9px] text-right">
-                      {r._rotEstado === 'Activo' ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#22c55e]">
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />Activo
-                        </span>
-                      ) : (
-                        <span className={`inline-block text-[11px] font-semibold tabular-nums ${
-                          r._rotEstado === 'CRITICO' ? 'text-[#ef4444]' :
-                          r._rotEstado === 'ALTO'    ? 'text-[#f97316]' :
-                          r._rotEstado === 'MEDIO'   ? 'text-[#f59e0b]' : 'text-[var(--text-sub)]'
-                        }`}>
-                          {fmtN(r._dias)} días
-                        </span>
-                      )}
-                    </td>
+                    {bodegasActivas.filter(b => !hiddenCols.has(b.label)).map(b => (
+                      <td key={b.label} className="px-[10px] py-[9px] text-right text-[11px] num" style={{ color: b.color }}>
+                        {fmtN(r._bodegas[b.label] ?? 0)}
+                      </td>
+                    ))}
+
+                    {!hiddenCols.has('Rotación') && (
+                      <td className="px-[10px] py-[9px] text-right">
+                        {r._rotEstado === 'Activo' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#22c55e]">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />Activo
+                          </span>
+                        ) : (
+                          <span className={`inline-block text-[11px] font-semibold tabular-nums ${
+                            r._rotEstado === 'CRITICO' ? 'text-[#ef4444]' :
+                            r._rotEstado === 'ALTO'    ? 'text-[#f97316]' :
+                            r._rotEstado === 'MEDIO'   ? 'text-[#f59e0b]' : 'text-[var(--text-sub)]'
+                          }`}>
+                            {fmtN(r._dias)} días
+                          </span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-[10px] py-[9px] text-right num text-[11px] text-[var(--text-sub)]">{fmt(r._precio)}</td>
                     <td className="px-[10px] py-[9px] text-right num text-[11px]">
                       <span className="font-semibold text-[var(--text)]">{fmt(r._valorTotal)}</span>
@@ -1197,7 +1316,7 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-[12px] text-[var(--text-muted)]">Sin resultados</td>
+                  <td colSpan={8 + bodegasActivas.length - hiddenCols.size} className="px-4 py-8 text-center text-[12px] text-[var(--text-muted)]">Sin resultados</td>
                 </tr>
               )}
             </tbody>
@@ -1241,6 +1360,35 @@ export default function InventarioSaldos({ saldos, sinRotar }: Props) {
               })}
             </div>
           </div>
+        )}
+
+        {/* Popup desglose de stock por bodega (tooltip por hover, encima del número).
+            Se renderiza en un portal a document.body porque la ficha contenedora tiene
+            overflow-y-auto/animación con transform, lo que rompe position:fixed si el
+            popup queda anidado adentro (el transform crea un containing block propio). */}
+        {stockPopupRow && stockPopupPos && createPortal(
+          <div ref={stockPopupRef}
+            style={{
+              position: 'fixed', top: stockPopupPos.top, left: stockPopupPos.left, zIndex: 9999,
+              transform: 'translate(-50%, -100%)', pointerEvents: 'none',
+            }}
+            className="w-[220px] bg-[var(--card)] border border-[var(--border)] rounded-[12px] shadow-lg p-3.5">
+            <div className="text-[11px] font-semibold text-[var(--text)] mb-2.5">
+              Stock por bodega · {fmtN(stockPopupRow._saldo)} total
+            </div>
+            <div className="space-y-1.5">
+              {bodegasActivas.map(b => (
+                <div key={b.label} className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
+                  <span className="text-[11px] text-[var(--text-sub)] flex-1">{b.label}</span>
+                  <span className="text-[11px] font-semibold num" style={{ color: b.color }}>
+                    {fmtN(stockPopupRow._bodegas[b.label] ?? 0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>,
+          document.body
         )}
       </div>
       </div>
