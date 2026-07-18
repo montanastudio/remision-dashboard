@@ -3,12 +3,11 @@
 import Link from 'next/link'
 
 const TABS = [
-  { key: 'bodegas',   label: 'Bodegas',         href: '/inventario' },
-  { key: 'saldos',    label: 'Saldos Físicos',  href: '/inventario?tab=saldos' },
-  { key: 'sin-rotar', label: 'Sin Rotar',       href: '/inventario?tab=sin-rotar' },
+  { key: 'resumen',  label: 'Resumen',              href: '/clientes' },
+  { key: 'analisis', label: 'Análisis de Cliente',  href: '/clientes?tab=analisis' },
 ]
 
-export default function TabsInventario({ activeTab }: { activeTab: string }) {
+export default function TabsClientes({ activeTab }: { activeTab: string }) {
   return (
     <div className="flex gap-1 mb-4 p-1 rounded-[10px] bg-[var(--bg)] border border-[var(--border)] w-fit">
       {TABS.map(t => (

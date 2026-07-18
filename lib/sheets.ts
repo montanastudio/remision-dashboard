@@ -185,6 +185,7 @@ export function normalizeVentasColumns(rows: Record<string, string>[]): Record<s
     CIUDAD:     r['Ciudad']         ?? r['CIUDAD']      ?? '',
     COSTO:      r['Costo ($)']      ?? r['COSTO']       ?? '',
     FACTURA:    r['Factura']        ?? r['FACTURA']     ?? '',
+    DEVOLUCION: r['Devolución']     ?? r['DEVOLUCION']  ?? '',
   }))
 }
 

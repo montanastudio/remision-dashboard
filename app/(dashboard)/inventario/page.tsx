@@ -10,6 +10,7 @@ import Card from '@/components/Card'
 import BarRows from '@/components/BarRows'
 import InventarioSinRotar from './InventarioSinRotar'
 import InventarioSaldos from './InventarioSaldos'
+import InventarioBodegas from './InventarioBodegas'
 import TabsInventario from './TabsInventario'
 
 export const dynamic = 'force-dynamic'
@@ -24,7 +25,7 @@ export default async function InventarioPage({
   const perms = await getPermissions()
   if (!canAccess(role, 'inventario', perms)) redirect('/resumen')
 
-  const tab = (Array.isArray(searchParams.tab) ? searchParams.tab[0] : searchParams.tab) ?? 'sin-rotar'
+  const tab = (Array.isArray(searchParams.tab) ? searchParams.tab[0] : searchParams.tab) ?? 'bodegas'
 
   type Row = Record<string, string>
   let inventario: Row[] = []
@@ -96,7 +97,7 @@ export default async function InventarioPage({
       )}
 
       {/* ── TAB: Sin Rotar ── */}
-      {tab !== 'saldos' && (
+      {tab === 'sin-rotar' && (
         <>
           <div className="mb-4">
             <MetricCard
@@ -121,6 +122,11 @@ export default async function InventarioPage({
       {/* ── TAB: Saldos Físicos ── */}
       {tab === 'saldos' && (
         <InventarioSaldos saldos={saldosData} sinRotar={sinRotar} />
+      )}
+
+      {/* ── TAB: Bodegas ── */}
+      {tab === 'bodegas' && (
+        <InventarioBodegas saldos={saldosData} />
       )}
     </div>
   )

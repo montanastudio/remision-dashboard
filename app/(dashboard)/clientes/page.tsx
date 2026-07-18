@@ -3,6 +3,8 @@ import { filtrarVentas, filtroLabel } from '@/lib/filtro-ventas'
 import { fmt } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
 import ClientesInteractivo from './ClientesInteractivo'
+import AnalisisCliente from './AnalisisCliente'
+import TabsClientes from './TabsClientes'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,14 +16,32 @@ export default async function ClientesPage({
   const sp = (k: string) => (Array.isArray(searchParams[k]) ? searchParams[k]![0] : searchParams[k] ?? undefined)
   const filtroParams = { filtro: sp('filtro'), m: sp('m'), y: sp('y'), desde: sp('desde'), hasta: sp('hasta') }
   const periodoLabel = filtroLabel(filtroParams)
+  const tab = sp('tab') ?? 'resumen'
 
   type Row = Record<string, string>
   let rawVentas: Row[] = []
+  let recibos: Row[] = []
+  let cartera: Row[] = []
 
   try {
     rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas')))
   } catch {
     // empty
+  }
+  try { recibos = rowsToObjects(await getSheetData('RAW_Recibos')) } catch { /* hoja no existe */ }
+  try { cartera = rowsToObjects(await getSheetData('RAW_Cartera')) } catch { /* hoja no existe */ }
+
+  // ── Tab: Análisis de Cliente (perfil completo por cliente) ────────────
+  if (tab === 'analisis') {
+    return (
+      <div className="fade-in-up">
+        <div className="text-[11px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)] mb-3">
+          Base de clientes
+        </div>
+        <TabsClientes activeTab={tab} />
+        <AnalisisCliente ventas={rawVentas} recibos={recibos} cartera={cartera} />
+      </div>
+    )
   }
 
   const ventas = filtrarVentas(rawVentas, filtroParams)
@@ -199,6 +219,8 @@ export default async function ClientesPage({
       <div className="text-[11px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)] mb-3">
         Base de clientes
       </div>
+
+      <TabsClientes activeTab={tab} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
         <MetricCard label="Base Total" value={`${totalClientesHistorico}`} sub="Clientes únicos históricos" />
