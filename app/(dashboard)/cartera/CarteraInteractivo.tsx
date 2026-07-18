@@ -4,7 +4,9 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import Card from '@/components/Card'
 import MiniDonut from './MiniDonut'
+import FacturaPopup, { FacturaInfo, AbonoInfo } from '@/components/FacturaPopup'
 import { exportToExcel } from '@/lib/exportExcel'
+import { parseFecha } from '@/lib/fecha'
 
 const CLIENT_COLORS = [
   '#1a3a8f', '#2563eb', '#3b82f6', '#60a5fa', '#818cf8',
@@ -72,6 +74,7 @@ function parseN(v: string | undefined) {
 interface Props {
   cartera:    Record<string, string>[]
   vendedores: string[]
+  recibos:    Record<string, string>[]
 }
 
 const BUCKET_LABEL: Record<string, string> = {
@@ -95,13 +98,15 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: { name
   )
 }
 
-export default function CarteraInteractivo({ cartera, vendedores }: Props) {
+export default function CarteraInteractivo({ cartera, vendedores, recibos }: Props) {
   const [selectedVendedor,    setSelectedVendedor]    = useState('')
   const [selectedBucket,      setSelectedBucket]      = useState<string | null>(null)
   const [selectedClientNIT,   setSelectedClientNIT]   = useState<string | null>(null)
-  const [selectedDetalleName, setSelectedDetalleName] = useState<string | null>(null)
-  const [showAllClients,      setShowAllClients]      = useState(false)
+  const [clientPage,          setClientPage]          = useState(0)
   const [clientSearch,        setClientSearch]        = useState('')
+  const [popupFactura, setPopupFactura] = useState<FacturaInfo | null>(null)
+  const [popupAbonos,  setPopupAbonos]  = useState<AbonoInfo[]>([])
+  const [recaudoRango, setRecaudoRango] = useState<'mes' | 'año' | 'todo'>('mes')
 
   const detalleRef = useRef<HTMLDivElement>(null)
 
@@ -116,14 +121,15 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
     })
   }
 
-  useEffect(() => { setSelectedClientNIT(null); setSelectedDetalleName(null); setClientSearch('') }, [selectedBucket])
-  useEffect(() => { setSelectedDetalleName(null) }, [selectedClientNIT])
+  useEffect(() => { setSelectedClientNIT(null); setClientSearch(''); setClientPage(0) }, [selectedBucket])
+  useEffect(() => { setRecaudoRango('mes') }, [selectedClientNIT])
+  useEffect(() => { setClientPage(0) }, [clientSearch])
   // Reset all drill-downs when vendor changes
   useEffect(() => {
     setSelectedBucket(null)
     setSelectedClientNIT(null)
-    setSelectedDetalleName(null)
     setClientSearch('')
+    setClientPage(0)
   }, [selectedVendedor])
 
   // ── Cartera filtrada por vendedor ──────────────────────────────────
@@ -210,8 +216,9 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
         c.nit.toLowerCase().includes(searchTerm)
       )
     : clientesList
-  const visibleClients = (showAllClients || searchTerm) ? searchedClients : searchedClients.slice(0, LIST_MAX)
-  const hiddenCount = searchTerm ? 0 : searchedClients.length - LIST_MAX
+  const totalClientPages = Math.max(1, Math.ceil(searchedClients.length / LIST_MAX))
+  const clientPageClamped = Math.min(clientPage, totalClientPages - 1)
+  const visibleClients = searchedClients.slice(clientPageClamped * LIST_MAX, (clientPageClamped + 1) * LIST_MAX)
 
   // ── Detalle por NIT ────────────────────────────────────────────────
   const detalleNIT = useMemo(() => {
@@ -275,16 +282,77 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
 
   const selectedClientName = detalleClienteGrupos[0]?.nombre ?? selectedClientNIT ?? ''
 
+  // ── Deuda actual del cliente (cartera pendiente ahora mismo) ────────
+  const clienteDeuda = useMemo(() => {
+    if (!selectedClientNIT) return null
+    const facturas = activeCartera.filter((r) =>
+      (r['NIT'] || '') === selectedClientNIT && (selectedBucket ? r['Bucket'] === selectedBucket : true)
+    )
+    const total = facturas.reduce((s, r) => s + parseN(r['Total Adeudado ($)']), 0)
+    const diasVencidos = facturas.map((r) => parseN(r['Días Vencido'])).filter((d) => d > 0)
+    const avgDias = diasVencidos.length > 0 ? Math.round(diasVencidos.reduce((a, b) => a + b, 0) / diasVencidos.length) : 0
+    return { total, nFacturas: facturas.length, avgDias }
+  }, [activeCartera, selectedClientNIT, selectedBucket])
+
+  // ── Recaudo del cliente seleccionado, según el rango elegido ────────
+  const clienteRecaudo = useMemo(() => {
+    if (!selectedClientNIT) return null
+    const hoy = new Date()
+    const pagosCliente = recibos.filter((r) => (r['NIT'] || '') === selectedClientNIT)
+    const pagos = recaudoRango === 'todo'
+      ? pagosCliente
+      : pagosCliente.filter((r) => {
+          const f = parseFecha(r['Fecha Pago'])
+          if (!f) return false
+          if (recaudoRango === 'año') return f.year === hoy.getFullYear()
+          return f.year === hoy.getFullYear() && f.mes === hoy.getMonth()
+        })
+    if (pagos.length === 0) return { total: 0, nAbonos: 0, ultimoPago: null as string | null }
+    const total = pagos.reduce((s, r) => s + parseN(r['Total Pagado ($)']), 0)
+    const ultimoPago = pagos
+      .map((r) => r['Fecha Pago'] || '')
+      .filter(Boolean)
+      .sort((a, b) => {
+        const [da, ma, ya] = a.split('/').map(Number)
+        const [db, mb, yb] = b.split('/').map(Number)
+        return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime()
+      })
+      .pop() ?? null
+    return { total, nAbonos: pagos.length, ultimoPago }
+  }, [recibos, selectedClientNIT, recaudoRango])
+
+  // ── Popup de detalle de factura (desde Facturas Vencidas) ───────────
+  const openFacturaPopup = useCallback((r: Record<string, string>) => {
+    const facturaNum = r['Factura'] ?? ''
+    const nit = r['NIT'] ?? ''
+    const abonos = recibos
+      .filter((x) => (x['Factura'] ?? '') === facturaNum && (x['NIT'] ?? '') === nit)
+      .map((x) => ({ recibo: x['Recibo'] ?? '', fechaPago: x['Fecha Pago'] ?? '', monto: parseN(x['Total Pagado ($)']) }))
+    setPopupFactura({
+      numero: facturaNum,
+      nit,
+      cliente: r['Cliente'] ?? '',
+      vendedor: r['Vendedor'],
+      fechaFactura: r['Fecha Factura'],
+      fechaVence: r['Fecha Vencimiento'],
+      dias: parseN(r['Días Vencido']),
+      bucket: r['Bucket'],
+      total: r['Total ($)'] !== undefined ? parseN(r['Total ($)']) : undefined,
+      abonado: r['Abonado ($)'] !== undefined ? parseN(r['Abonado ($)']) : undefined,
+      saldo: parseN(r['Total Adeudado ($)']),
+    })
+    setPopupAbonos(abonos)
+  }, [recibos])
+
   // ── Facturas Vencidas ──────────────────────────────────────────────
   const filteredVencidas = useMemo(() => {
     return activeCartera
       .filter((r) => {
-        if (selectedDetalleName) return r['Cliente']?.trim() === selectedDetalleName
-        if (selectedClientNIT)   return (r['NIT'] || '') === selectedClientNIT && (selectedBucket ? r['Bucket'] === selectedBucket : true)
+        if (selectedClientNIT) return (r['NIT'] || '') === selectedClientNIT && (selectedBucket ? r['Bucket'] === selectedBucket : true)
         return r['En Mora'] === 'SI' && (selectedBucket ? r['Bucket'] === selectedBucket : true)
       })
       .sort((a, b) => parseN(b['Días Vencido']) - parseN(a['Días Vencido']))
-  }, [activeCartera, selectedDetalleName, selectedClientNIT, selectedBucket])
+  }, [activeCartera, selectedClientNIT, selectedBucket])
 
   // ── Exportar ───────────────────────────────────────────────────────
   const exportDetalle = useCallback(() => {
@@ -311,13 +379,11 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
       'Días Vencido':      r['Días Vencido'] ?? '',
       'Total Adeudado ($)': r['Total Adeudado ($)'] ?? '',
     }))
-    const base = selectedDetalleName
-      ? selectedDetalleName
-      : selectedClientNIT
-        ? (selectedClientName || selectedClientNIT)
-        : (selectedBucket ?? 'Todas')
+    const base = selectedClientNIT
+      ? (selectedClientName || selectedClientNIT)
+      : (selectedBucket ?? 'Todas')
     exportToExcel(rows, `Facturas_${base.replace(/[/\\?%*:|"<>]/g, '-')}`, 'Facturas')
-  }, [filteredVencidas, selectedDetalleName, selectedClientNIT, selectedClientName, selectedBucket])
+  }, [filteredVencidas, selectedClientNIT, selectedClientName, selectedBucket])
 
   // ── RENDER ─────────────────────────────────────────────────────────
   return (
@@ -358,91 +424,61 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
         </div>
       )}
 
-      {/* Tarjeta encabezado: total + mini donut */}
-      <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card p-[16px_18px] mb-4 flex items-center gap-4">
-        <div className="flex-1 min-w-0">
-          <div className="text-[11px] font-medium text-[var(--text-sub)] mb-1">
-            Total Cartera{selectedVendedor && <span className="ml-1.5 text-[var(--brand-blue)]">· {selectedVendedor}</span>}
+      {/* Tarjeta encabezado: total + mini donut + distribución por rango */}
+      <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card p-[16px_18px] mb-4">
+        <div className="flex items-center gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-medium text-[var(--text-sub)] mb-1">
+              Total Cartera{selectedVendedor && <span className="ml-1.5 text-[var(--brand-blue)]">· {selectedVendedor}</span>}
+            </div>
+            <div className="text-[28px] md:text-[32px] font-bold tracking-[-0.5px] text-[var(--text)] leading-tight break-words">
+              {fmt(totalCartera)}
+            </div>
+            <div className="mt-1.5 flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
+              <span><span className="font-semibold text-[var(--text-sub)]">{clientesEnMora.toLocaleString('es-CO')}</span> clientes en mora</span>
+              <span className="text-[var(--border)]">·</span>
+              <span><span className="font-semibold text-[var(--text-sub)]">{facturasEnMora.toLocaleString('es-CO')}</span> facturas vencidas</span>
+            </div>
           </div>
-          <div className="text-[28px] md:text-[32px] font-bold tracking-[-0.5px] text-[var(--text)] leading-tight break-words">
-            {fmt(totalCartera)}
-          </div>
-          <div className="mt-1.5 flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
-            <span><span className="font-semibold text-[var(--text-sub)]">{clientesEnMora.toLocaleString('es-CO')}</span> clientes en mora</span>
-            <span className="text-[var(--border)]">·</span>
-            <span><span className="font-semibold text-[var(--text-sub)]">{facturasEnMora.toLocaleString('es-CO')}</span> facturas vencidas</span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
-            {donutData.map(b => (
-              <span key={b.name} className="flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: b.color }} />
-                <span title={b.name}>{b.label}</span>
-              </span>
-            ))}
-          </div>
+          <MiniDonut data={donutData} />
         </div>
-        <MiniDonut data={donutData} />
+
+        {/* Distribución por rango — clic para filtrar */}
+        <div className="mt-4 pt-4 border-t border-[var(--border)] space-y-1.5">
+          {bucketBars.map((b, i) => (
+            <button key={i} onClick={() => toggleBucket(b.name)} title={b.name}
+              className={`w-full flex items-center gap-2 rounded-[6px] px-2 py-[5px] transition-all text-left group ${
+                selectedBucket === b.name ? 'bg-[var(--bar-bg)] ring-1 ring-[var(--border)]' : 'hover:bg-[var(--bar-bg)]'
+              }`}>
+              <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: b.color }} />
+              <span className={`text-[12px] w-[52px] flex-shrink-0 font-semibold num ${selectedBucket === b.name ? 'text-[var(--text)]' : 'text-[var(--text-sub)]'}`}>
+                {b.label}
+              </span>
+              <span className="text-[11px] text-[var(--text-muted)] flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hidden md:block"
+                style={{ maxWidth: 110, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                {b.name}
+              </span>
+              <div className="flex-1 h-[4px] bg-[var(--bar-bg)] rounded-full overflow-hidden">
+                <div className="h-full rounded-full transition-opacity"
+                  style={{ width: `${b.pct}%`, background: b.color, opacity: selectedBucket && selectedBucket !== b.name ? 0.25 : 1 }} />
+              </div>
+              <span className="text-[11px] num text-[var(--text)] w-[86px] text-right flex-shrink-0">{b.value}</span>
+              <span className="text-[10px] num text-[var(--text-muted)] w-[28px] text-right flex-shrink-0">
+                {totalCartera > 0 ? ((b.raw / totalCartera) * 100).toFixed(0) : 0}%
+              </span>
+            </button>
+          ))}
+          {selectedBucket && (
+            <button onClick={() => setSelectedBucket(null)}
+              className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] mt-1 flex items-center gap-1 px-2">
+              <span>✕</span> Limpiar filtro
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Fila donuts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-
-        {/* Distribución de Cartera */}
-        <Card title="Distribución de Cartera" subtitle={`Total: ${fmt(totalCartera)}`}>
-          <div className="flex flex-col md:flex-row gap-4 md:gap-6 items-center">
-            <div className="w-full md:w-[160px] flex-shrink-0">
-              <div className="h-[160px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={donutData} cx="50%" cy="50%" innerRadius={46} outerRadius={68}
-                      dataKey="value" paddingAngle={2} animationBegin={0} animationDuration={600}
-                      onClick={(e) => e?.name && toggleBucket(e.name)} style={{ cursor: 'pointer' }}>
-                      {donutData.map((e, i) => (
-                        <Cell key={i} fill={e.color}
-                          opacity={selectedBucket && selectedBucket !== e.name ? 0.25 : 1}
-                          stroke={selectedBucket === e.name ? '#fff' : 'none'} strokeWidth={2} />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<CustomTooltip />} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-            <div className="flex-1 w-full space-y-1.5">
-              {bucketBars.map((b, i) => (
-                <button key={i} onClick={() => toggleBucket(b.name)} title={b.name}
-                  className={`w-full flex items-center gap-2 rounded-[6px] px-2 py-[5px] transition-all text-left group ${
-                    selectedBucket === b.name ? 'bg-[var(--bar-bg)] ring-1 ring-[var(--border)]' : 'hover:bg-[var(--bar-bg)]'
-                  }`}>
-                  <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: b.color }} />
-                  <span className={`text-[12px] w-[52px] flex-shrink-0 font-semibold num ${selectedBucket === b.name ? 'text-[var(--text)]' : 'text-[var(--text-sub)]'}`}>
-                    {b.label}
-                  </span>
-                  <span className="text-[11px] text-[var(--text-muted)] flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hidden md:block"
-                    style={{ maxWidth: 110, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
-                    {b.name}
-                  </span>
-                  <div className="flex-1 h-[4px] bg-[var(--bar-bg)] rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-opacity"
-                      style={{ width: `${b.pct}%`, background: b.color, opacity: selectedBucket && selectedBucket !== b.name ? 0.25 : 1 }} />
-                  </div>
-                  <span className="text-[11px] num text-[var(--text)] w-[86px] text-right flex-shrink-0">{b.value}</span>
-                  <span className="text-[10px] num text-[var(--text-muted)] w-[28px] text-right flex-shrink-0">
-                    {totalCartera > 0 ? ((b.raw / totalCartera) * 100).toFixed(0) : 0}%
-                  </span>
-                </button>
-              ))}
-              {selectedBucket && (
-                <button onClick={() => setSelectedBucket(null)}
-                  className="text-[10px] text-[var(--text-muted)] hover:text-[var(--text)] mt-1 flex items-center gap-1 px-2">
-                  <span>✕</span> Limpiar filtro
-                </button>
-              )}
-            </div>
-          </div>
-        </Card>
-
-        {/* Clientes con Cartera */}
+      {/* Clientes con Cartera */}
+      <div className="mb-4">
         <Card title="Clientes con Cartera"
           subtitle={selectedBucket ? `Rango: ${selectedBucket}` : 'Todos los rangos'}>
           {clientesList.length === 0 ? (
@@ -522,17 +558,24 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
                 </tbody>
               </table>
 
-              {hiddenCount > 0 && !showAllClients && (
-                <button onClick={() => setShowAllClients(true)}
-                  className="text-[11px] text-[var(--text-muted)] hover:text-[var(--text)] flex items-center gap-1 transition-colors pt-0.5">
-                  <span>▼</span> +{hiddenCount} más
-                </button>
-              )}
-              {showAllClients && (
-                <div className="sticky bottom-4 flex justify-center mt-3 pointer-events-none">
-                  <button onClick={() => setShowAllClients(false)}
-                    className="pointer-events-auto flex items-center gap-1.5 px-4 py-1.5 rounded-full text-[11px] font-medium shadow-lg transition-all bg-[var(--card)] border border-[var(--border)] text-[var(--text-sub)] hover:text-[var(--text)] hover:shadow-xl">
-                    <span className="inline-block rotate-180">▼</span> Ocultar
+              {totalClientPages > 1 && (
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    onClick={() => setClientPage(p => Math.max(0, p - 1))}
+                    disabled={clientPageClamped === 0}
+                    className="px-2.5 py-1 rounded-[6px] text-[11px] font-medium border border-[var(--border)] text-[var(--text-sub)] hover:bg-[var(--bar-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    ‹ Anterior
+                  </button>
+                  <span className="text-[10px] text-[var(--text-muted)]">
+                    Página {clientPageClamped + 1} de {totalClientPages}
+                  </span>
+                  <button
+                    onClick={() => setClientPage(p => Math.min(totalClientPages - 1, p + 1))}
+                    disabled={clientPageClamped >= totalClientPages - 1}
+                    className="px-2.5 py-1 rounded-[6px] text-[11px] font-medium border border-[var(--border)] text-[var(--text-sub)] hover:bg-[var(--bar-bg)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    Siguiente ›
                   </button>
                 </div>
               )}
@@ -582,7 +625,32 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
           {selectedClientNIT && (
             <div className="border-t border-[var(--border)] px-[18px] pb-[16px] pt-[12px]">
 
-              {/* Mini distribución de cartera del cliente */}
+              {/* Deuda actual del cliente */}
+              {clienteDeuda && (
+                <div className="mb-4 p-3 rounded-[8px] bg-[var(--bar-bg)]">
+                  <div className="mb-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                      Debe Actualmente{selectedBucket ? ` · ${selectedBucket}` : ''}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <div className="text-[10px] text-[var(--text-muted)]">Saldo</div>
+                      <div className="text-[14px] font-bold text-[#ef4444] num">{fmt(clienteDeuda.total)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-[var(--text-muted)]">Facturas</div>
+                      <div className="text-[14px] font-bold text-[var(--text)] num">{fmtN(clienteDeuda.nFacturas)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-[var(--text-muted)]">Días Prom. Vencido</div>
+                      <div className="text-[14px] font-bold text-[var(--text)] num">{clienteDeuda.avgDias > 0 ? fmtN(clienteDeuda.avgDias) : '—'}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Gráfico y división de la deuda por rango de días */}
               {clienteDistribucion.length > 0 && (
                 <div className="flex flex-col sm:flex-row items-center gap-4 mb-4 p-3 rounded-[8px] bg-[var(--bar-bg)]">
                   <div className="w-[100px] h-[100px] flex-shrink-0">
@@ -620,53 +688,47 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
                 </div>
               )}
 
-              {/* Tabla agrupada por nombre */}
-              {detalleClienteGrupos.length === 0 ? (
-                <div className="py-6 text-center text-[12px] text-[var(--text-muted)]">Sin datos para este rango</div>
-              ) : (
-                <div className="table-scroll" style={{ maxHeight: 360 }}>
-                  <table className="w-full border-collapse text-[12px]">
-                    <thead className="sticky top-0 bg-[var(--card)] z-10">
-                      <tr>
-                        {[
-                          { l: 'Nombre',      a: 'left'   },
-                          { l: 'Total',       a: 'right'  },
-                          { l: 'Prom. días',  a: 'right'  },
-                          { l: 'Estado',      a: 'center' },
-                        ].map((h) => (
-                          <th key={h.l} className={`px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] text-${h.a}`}>
-                            {h.l}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detalleClienteGrupos.map((g, i) => {
-                        const avgDias = g.diasCount > 0 ? Math.round(g.diasSum / g.diasCount) : 0
-                        const color   = BUCKET_COLOR[g.worstBucket] ?? '#94a3b8'
-                        const isSelected = selectedDetalleName === g.nombre
-                        return (
-                          <tr key={i}
-                            onClick={() => setSelectedDetalleName((p) => p === g.nombre ? null : g.nombre)}
-                            className={`border-b border-[var(--border)] last:border-0 transition-colors cursor-pointer ${
-                              isSelected ? 'bg-[var(--bar-bg)] ring-1 ring-inset ring-[var(--border)]' : 'hover:bg-[var(--nav-hover)]'
-                            }`}>
-                            <td className="px-[10px] py-[9px] text-[var(--text-sub)]">
-                              {isSelected && <span className="mr-1 text-[var(--text-muted)]">▸</span>}
-                              <span className={isSelected ? 'font-semibold text-[var(--text)]' : ''}>{g.nombre}</span>
-                            </td>
-                            <td className="px-[10px] py-[9px] text-right num text-[11px] font-medium text-[var(--text)]">{fmt(g.total)}</td>
-                            <td className="px-[10px] py-[9px] text-right num text-[11px] text-[var(--text-sub)]">
-                              {avgDias > 0 ? fmtN(avgDias) : '—'}
-                            </td>
-                            <td className="px-[10px] py-[9px] text-center">
-                              <span className="inline-block w-3 h-3 rounded-full" style={{ background: color }} title={g.worstBucket} />
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+              {/* Recaudo del cliente, con filtro de rango de tiempo */}
+              {clienteRecaudo && (
+                <div className="p-3 rounded-[8px] bg-[var(--bar-bg)]">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                      Recaudo del cliente
+                    </span>
+                    <div className="flex gap-1">
+                      {([
+                        { key: 'mes',  label: 'Mes actual' },
+                        { key: 'año',  label: 'Año actual' },
+                        { key: 'todo', label: 'Histórico'  },
+                      ] as { key: 'mes' | 'año' | 'todo'; label: string }[]).map(opt => (
+                        <button
+                          key={opt.key}
+                          onClick={() => setRecaudoRango(opt.key)}
+                          className={`text-[10px] font-medium px-2 py-[3px] rounded-full border transition-all leading-none ${
+                            recaudoRango === opt.key
+                              ? 'bg-[var(--brand-blue)] border-[var(--brand-blue)] text-white'
+                              : 'border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--card)]'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <div className="text-[10px] text-[var(--text-muted)]">Recaudado</div>
+                      <div className="text-[14px] font-bold text-[#22c55e] num">{fmt(clienteRecaudo.total)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-[var(--text-muted)]">Abonos</div>
+                      <div className="text-[14px] font-bold text-[var(--text)] num">{fmtN(clienteRecaudo.nAbonos)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] text-[var(--text-muted)]">Último Pago</div>
+                      <div className="text-[14px] font-bold text-[var(--text)] num">{clienteRecaudo.ultimoPago ?? '—'}</div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -685,13 +747,11 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
       {/* ── Facturas Vencidas ── */}
       <Card
         title="Facturas Vencidas"
-        subtitle={selectedDetalleName
-          ? `${selectedDetalleName} — ${filteredVencidas.length} facturas`
-          : selectedClientNIT
-            ? `${selectedClientName} — ${filteredVencidas.length} facturas`
-            : selectedBucket
-              ? `Rango: ${selectedBucket} — ${filteredVencidas.length} facturas`
-              : `Todas — ${filteredVencidas.length} facturas`}
+        subtitle={selectedClientNIT
+          ? `${selectedClientName} — ${filteredVencidas.length} facturas`
+          : selectedBucket
+            ? `Rango: ${selectedBucket} — ${filteredVencidas.length} facturas`
+            : `Todas — ${filteredVencidas.length} facturas`}
         action={
           filteredVencidas.length > 0 && (
             <button
@@ -729,7 +789,10 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
                   const bucket = r['Bucket'] ?? ''
                   const bs     = BUCKET_BADGE[bucket] ?? { bg: 'bg-[var(--bar-bg)]', text: 'text-[var(--text-sub)]' }
                   return (
-                    <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
+                    <tr key={i}
+                      onClick={() => openFacturaPopup(r)}
+                      className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors cursor-pointer"
+                      title="Ver análisis de la factura">
                       <td className="px-[10px] py-[9px] num text-[11px] text-[var(--text-sub)]">{r['NIT']}</td>
                       <td className="px-[10px] py-[9px]">
                         <span className="font-medium text-[var(--text)] block max-w-[160px] truncate">{r['Cliente']}</span>
@@ -754,6 +817,8 @@ export default function CarteraInteractivo({ cartera, vendedores }: Props) {
           </div>
         )}
       </Card>
+
+      <FacturaPopup factura={popupFactura} abonos={popupAbonos} onClose={() => setPopupFactura(null)} />
     </>
   )
 }

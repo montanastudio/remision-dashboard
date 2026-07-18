@@ -25,7 +25,9 @@ export default async function CarteraPage() {
 
   type Row = Record<string, string>
   let cartera: Row[] = []
+  let recibos: Row[] = []
   try { cartera = rowsToObjects(await getSheetData('RAW_Cartera')) } catch { /* hoja no existe */ }
+  try { recibos = rowsToObjects(await getSheetData('RAW_Recibos')) } catch { /* hoja no existe */ }
 
   // Normalizar bucket (legacy → nombres canónicos) y remapear columnas de
   // RAW_Cartera a los nombres que espera CarteraInteractivo (heredados de la
@@ -47,7 +49,7 @@ export default async function CarteraPage() {
 
   return (
     <div className="fade-in-up">
-      <CarteraInteractivo cartera={carteraNorm} vendedores={vendedores} />
+      <CarteraInteractivo cartera={carteraNorm} vendedores={vendedores} recibos={recibos} />
     </div>
   )
 }

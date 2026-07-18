@@ -108,6 +108,18 @@ const sections: NavSection[] = [
         ),
       },
       {
+        href: '/recaudos',
+        section: 'recaudos',
+        label: 'Recaudos',
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M20 12V8H6a2 2 0 010-4h12v4" />
+            <path d="M4 6v12a2 2 0 002 2h14v-4" />
+            <path d="M18 12a2 2 0 000 4h4v-4Z" />
+          </svg>
+        ),
+      },
+      {
         href: '/gestion-cartera',
         section: 'gestion_cartera',
         label: 'Gestión Cartera',
@@ -185,7 +197,7 @@ const sections: NavSection[] = [
 ]
 
 // Páginas que leen el filtro de período desde URL params
-const FILTRO_PAGES = new Set(['/resumen', '/ventas', '/vendedores', '/clientes', '/zona'])
+const FILTRO_PAGES = new Set(['/resumen', '/ventas', '/vendedores', '/clientes', '/zona', '/recaudos'])
 
 /** Inner component que usa useSearchParams para preservar el filtro al navegar */
 function NavLinks({

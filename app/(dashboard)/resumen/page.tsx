@@ -1,5 +1,6 @@
 import { getSheetData, rowsToObjects, normalizeVentasColumns, parseNum, parseFecha } from '@/lib/sheets'
 import { computeSinRotar } from '@/lib/rotacion'
+import { normalizeRecibos } from '@/lib/recaudos'
 import { filtrarVentas, filtroLabel } from '@/lib/filtro-ventas'
 import { fmt, fmtN } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
@@ -35,8 +36,14 @@ export default async function ResumenPage({
   try { movimientos     = rowsToObjects(await getSheetData('RAW_Movimientos'))      } catch { /* hoja no existe */ }
   try { metasRows       = rowsToObjects(await getSheetData('LS METAS Y PROYECCION')) } catch { /* hoja no existe */ }
   try { ventasMensual   = rowsToObjects(await getSheetData('RES_Ventas_Mensual')) } catch { /* hoja no existe */ }
+  let recibosRaw: Row[] = []
+  try { recibosRaw = rowsToObjects(await getSheetData('RAW_Recibos')) } catch { /* hoja no existe */ }
 
   const sinRotar = computeSinRotar(movimientos, inventarioStock)
+
+  // ── Recaudo del período ───────────────────────────────────────────────
+  const recibosFiltrados = filtrarVentas(normalizeRecibos(recibosRaw), filtroParams)
+  const totalRecaudado = recibosFiltrados.reduce((s, r) => s + parseNum(r['MONTO']), 0)
 
   // ── Mínimo de gastos fijos desde LS_MINIMOS ─────────────────────────
   let minimoMensual: number | undefined = undefined
@@ -320,6 +327,7 @@ export default async function ResumenPage({
           />
           <MetricCard label="Cartera +90 días" value={fmt(cartera90Total)} sub={`${totalCartera > 0 ? ((cartera90Total / totalCartera) * 100).toFixed(1) : 0}% de cartera total`} variant="alert" />
           <MetricCard label="Inventario Sin Rotar" value={fmt(valCritico)} sub={`${criticosSinRotar.length} productos críticos`} variant="warn" />
+          <MetricCard label="Recaudo del Período" value={fmt(totalRecaudado)} sub={periodoLabel} variant="good" />
         </div>
       </div>
 

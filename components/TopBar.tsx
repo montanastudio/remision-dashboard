@@ -16,6 +16,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/vendedores': 'Vendedores',
   '/clientes': 'Clientes',
   '/cartera': 'Cartera',
+  '/recaudos': 'Recaudos',
   '/inventario': 'Inventario',
   '/zona': 'Zonas',
   '/configuracion/usuarios': 'Usuarios',
@@ -30,6 +31,7 @@ const PAGE_SUBS: Record<string, string> = {
   '/vendedores': 'Rendimiento del equipo comercial',
   '/clientes': 'Top clientes y detalle de compras',
   '/cartera': 'Gestión de cartera y antigüedad',
+  '/recaudos': 'Análisis de recaudo y pagos',
   '/inventario': 'Stock, rotación y movimientos',
   '/zona': 'Cobertura geográfica por zona',
   '/configuracion/usuarios': 'Gestión de acceso al sistema',
@@ -39,7 +41,7 @@ const PAGE_SUBS: Record<string, string> = {
 }
 
 // Páginas donde el filtro de período es relevante (usan LS_VENTAS)
-const FILTRO_PAGES = new Set(['/resumen', '/ventas', '/vendedores', '/clientes', '/zona'])
+const FILTRO_PAGES = new Set(['/resumen', '/ventas', '/vendedores', '/clientes', '/zona', '/recaudos'])
 
 // Fallback estático mientras PeriodoPicker carga (Suspense)
 function PeriodoPickerFallback() {

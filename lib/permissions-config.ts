@@ -1,6 +1,6 @@
 export const SECTIONS = [
   'resumen', 'ventas', 'vendedores', 'clientes',
-  'cartera', 'gestion_cartera', 'inventario', 'zona', 'configuracion',
+  'cartera', 'recaudos', 'gestion_cartera', 'inventario', 'zona', 'configuracion',
   'calculadora_precios',
 ] as const
 
@@ -12,6 +12,7 @@ export const SECTION_LABELS: Record<Seccion, string> = {
   vendedores: 'Vendedores',
   clientes: 'Clientes',
   cartera: 'Cartera',
+  recaudos: 'Recaudos',
   gestion_cartera: 'Gestión Cartera',
   inventario: 'Inventario',
   zona: 'Ventas por Zona',
@@ -23,15 +24,15 @@ export type RolePerms = Record<Seccion, boolean>
 export type AllPerms = Record<string, RolePerms>
 
 export const DEFAULT_PERMISSIONS: AllPerms = {
-  Administrador: { resumen: true,  ventas: true,  vendedores: true,  clientes: true,  cartera: true,  gestion_cartera: true,  inventario: true,  zona: true,  configuracion: true,  calculadora_precios: true  },
-  Gerencia:      { resumen: true,  ventas: true,  vendedores: true,  clientes: true,  cartera: true,  gestion_cartera: true,  inventario: true,  zona: true,  configuracion: false, calculadora_precios: true  },
-  Ventas:        { resumen: true,  ventas: true,  vendedores: true,  clientes: true,  cartera: false, gestion_cartera: false, inventario: false, zona: false, configuracion: false, calculadora_precios: false },
-  Cartera:       { resumen: false, ventas: false, vendedores: false, clientes: false, cartera: true,  gestion_cartera: true,  inventario: false, zona: false, configuracion: false, calculadora_precios: false },
+  Administrador: { resumen: true,  ventas: true,  vendedores: true,  clientes: true,  cartera: true,  recaudos: true,  gestion_cartera: true,  inventario: true,  zona: true,  configuracion: true,  calculadora_precios: true  },
+  Gerencia:      { resumen: true,  ventas: true,  vendedores: true,  clientes: true,  cartera: true,  recaudos: true,  gestion_cartera: true,  inventario: true,  zona: true,  configuracion: false, calculadora_precios: true  },
+  Ventas:        { resumen: true,  ventas: true,  vendedores: true,  clientes: true,  cartera: false, recaudos: false, gestion_cartera: false, inventario: false, zona: false, configuracion: false, calculadora_precios: false },
+  Cartera:       { resumen: false, ventas: false, vendedores: false, clientes: false, cartera: true,  recaudos: true,  gestion_cartera: true,  inventario: false, zona: false, configuracion: false, calculadora_precios: false },
 }
 
 export const NEW_ROLE_DEFAULTS: RolePerms = {
   resumen: true, ventas: true, vendedores: true, clientes: true,
-  cartera: false, gestion_cartera: false, inventario: false, zona: false, configuracion: false,
+  cartera: false, recaudos: false, gestion_cartera: false, inventario: false, zona: false, configuracion: false,
   calculadora_precios: false,
 }
 
@@ -43,6 +44,7 @@ export const SECTION_ROUTES: Record<Seccion, string> = {
   vendedores:           '/vendedores',
   clientes:             '/clientes',
   cartera:              '/cartera',
+  recaudos:             '/recaudos',
   gestion_cartera:      '/gestion-cartera',
   inventario:           '/inventario',
   zona:                 '/zona',
