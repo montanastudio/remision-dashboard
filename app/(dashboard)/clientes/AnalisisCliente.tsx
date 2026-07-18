@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import Card from '@/components/Card'
 import BarRows from '@/components/BarRows'
 import { fmt, fmtN } from '@/lib/format'
@@ -76,6 +77,25 @@ interface Props {
 export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
   const [query, setQuery] = useState('')
   const [selectedNIT, setSelectedNIT] = useState<string | null>(null)
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [infoPos, setInfoPos] = useState<{ top: number; right: number } | null>(null)
+  const infoRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function onOutside(e: MouseEvent) {
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) setInfoOpen(false)
+    }
+    document.addEventListener('mousedown', onOutside)
+    return () => document.removeEventListener('mousedown', onOutside)
+  }, [])
+
+  function toggleInfo(e: React.MouseEvent<HTMLButtonElement>) {
+    e.stopPropagation()
+    if (infoOpen) { setInfoOpen(false); return }
+    const rect = e.currentTarget.getBoundingClientRect()
+    setInfoPos({ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right - 140) })
+    setInfoOpen(true)
+  }
 
   // ── Lista de clientes para el selector ────────────────────────────────
   const clientes = useMemo(() => {
@@ -283,7 +303,16 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
               </div>
               <div className="flex items-center gap-4">
                 <div className="text-right">
-                  <div className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Score de riesgo</div>
+                  <div className="flex items-center justify-end gap-1.5">
+                    <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">Score de riesgo</span>
+                    <button
+                      onClick={toggleInfo}
+                      className="w-[15px] h-[15px] rounded-full border border-[var(--border)] text-[9px] font-bold text-[var(--text-muted)] hover:border-[var(--text-sub)] hover:text-[var(--text)] transition-colors flex items-center justify-center leading-none flex-shrink-0"
+                      aria-label="Cómo se calcula el score de riesgo"
+                    >
+                      ?
+                    </button>
+                  </div>
                   <div className="text-[22px] font-bold num" style={{ color: analisis.nivel.color }}>
                     {analisis.score}<span className="text-[12px] font-normal text-[var(--text-muted)]">/9</span>
                   </div>
@@ -492,6 +521,53 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
             </Card>
           </div>
         </>
+      )}
+
+      {/* Popup: cómo se calcula el score de riesgo (portal para evitar containing blocks) */}
+      {infoOpen && infoPos && typeof document !== 'undefined' && createPortal(
+        <div ref={infoRef}
+          style={{ position: 'fixed', top: infoPos.top, right: infoPos.right, zIndex: 9999 }}
+          className="w-[300px] max-w-[calc(100vw-24px)] bg-[var(--card)] border border-[var(--border)] rounded-[12px] shadow-lg p-4">
+          <div className="text-[12px] font-semibold text-[var(--text)] mb-1">¿Cómo se calcula el score de riesgo?</div>
+          <p className="text-[10px] text-[var(--text-muted)] mb-3 leading-relaxed">
+            Suma de 3 factores, cada uno de 0 a 3 puntos. A mayor puntaje, mayor riesgo de cartera con este cliente.
+          </p>
+
+          <div className="space-y-2.5 mb-3">
+            <div>
+              <div className="text-[11px] font-semibold text-[var(--text)]">1 · Hábito de pago</div>
+              <div className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                Días promedio en pagar después del vencimiento (ponderado por monto):
+                a tiempo = 0 · 1-30 días = 1 · 31-60 = 2 · más de 60 = 3
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold text-[var(--text)]">2 · Deuda vencida vs compras</div>
+              <div className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                Deuda vencida actual como % de sus compras de los últimos 12 meses:
+                sin deuda = 0 · menos del 10% = 1 · 10-25% = 2 · más del 25% = 3
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold text-[var(--text)]">3 · Antigüedad de la mora</div>
+              <div className="text-[10px] text-[var(--text-muted)] leading-relaxed">
+                Días vencidos de su peor factura pendiente:
+                sin mora = 0 · hasta 45 días = 1 · 46-90 = 2 · 91 o más = 3
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-[var(--border)] pt-2.5 space-y-1.5">
+            {RISK_LEVELS.map(l => (
+              <div key={l.label} className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: l.color }} />
+                <span className="text-[11px] font-semibold flex-1" style={{ color: l.color }}>{l.label}</span>
+                <span className="text-[10px] text-[var(--text-muted)] num">{l.min}–{l.max} pts</span>
+              </div>
+            ))}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   )

@@ -5,6 +5,8 @@ import MetricCard from '@/components/MetricCard'
 import Card from '@/components/Card'
 import MetasGauges from './MetasGauges'
 import VendedoresInteractivo from './VendedoresInteractivo'
+import AnalisisVendedores from './AnalisisVendedores'
+import TabsVendedores from './TabsVendedores'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,6 +32,7 @@ export default async function VendedoresPage({
 }) {
   const sp = (k: string) => (Array.isArray(searchParams[k]) ? searchParams[k]![0] : searchParams[k] ?? undefined)
   const filtroParams = { filtro: sp('filtro'), m: sp('m'), y: sp('y'), desde: sp('desde'), hasta: sp('hasta') }
+  const tab = sp('tab') ?? 'resumen'
 
   type Row = Record<string, string>
   let rawVentas: Row[] = []
@@ -41,6 +44,24 @@ export default async function VendedoresPage({
   try {
     rawVentas = normalizeVentasColumns(rowsToObjects(await getSheetData('RAW_Ventas')))
   } catch { /* empty */ }
+
+  // ── Tab: Análisis y Ranking (score, perfil, metas dinámicas) ─────────
+  if (tab === 'analisis') {
+    let carteraRaw: Row[] = []
+    let recibosRaw: Row[] = []
+    try { carteraRaw = rowsToObjects(await getSheetData('RAW_Cartera')) } catch { /* hoja no existe */ }
+    try { recibosRaw = rowsToObjects(await getSheetData('RAW_Recibos')) } catch { /* hoja no existe */ }
+    return (
+      <div className="fade-in-up">
+        <div className="text-[11px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)] mb-3">
+          Equipo comercial
+        </div>
+        <TabsVendedores activeTab={tab} />
+        <AnalisisVendedores ventas={rawVentas} cartera={carteraRaw} recibos={recibosRaw} />
+      </div>
+    )
+  }
+
   try {
     ventasMensual = rowsToObjects(await getSheetData('RES_Ventas_Mensual'))
   } catch { /* hoja no existe */ }
@@ -210,6 +231,8 @@ export default async function VendedoresPage({
       <div className="text-[11px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)] mb-3">
         Equipo comercial
       </div>
+
+      <TabsVendedores activeTab={tab} />
 
       <div className="grid grid-cols-2 md:grid-cols-2 gap-3 mb-4">
         <MetricCard label="Vendedores Activos" value={String(vds.length)} sub="Con ventas en el período" />
