@@ -20,6 +20,33 @@ function getAuth(write = false) {
   })
 }
 
+/**
+ * Fecha/hora en que el Google Sheet fue modificado por última vez (Drive
+ * modifiedTime, en ISO UTC). Es la "última actualización de datos" — distinta
+ * de la fecha hasta la que hay información (que sale de las transacciones).
+ * Devuelve null si la Drive API no está habilitada o falla (degradación limpia).
+ */
+export async function getSpreadsheetModifiedTime(): Promise<string | null> {
+  try {
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+        private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      },
+      scopes: ['https://www.googleapis.com/auth/drive.metadata.readonly'],
+    })
+    const drive = google.drive({ version: 'v3', auth })
+    const res = await drive.files.get({
+      fileId: SPREADSHEET_ID,
+      fields: 'modifiedTime',
+      supportsAllDrives: true,
+    })
+    return res.data.modifiedTime ?? null
+  } catch {
+    return null
+  }
+}
+
 export type SheetName =
   // Ventas
   | 'RAW_Ventas'

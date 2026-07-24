@@ -3,6 +3,8 @@
 import { useState } from 'react'
 import SidebarNav from './SidebarNav'
 import TopBar from './TopBar'
+import { EstadoDatosProvider } from './EstadoDatosContext'
+import AvisoFechaDatos from './AvisoFechaDatos'
 
 interface LayoutShellProps {
   children: React.ReactNode
@@ -13,6 +15,7 @@ export default function LayoutShell({ children, allowedSections }: LayoutShellPr
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
+    <EstadoDatosProvider>
     <div className="flex h-screen overflow-hidden bg-[var(--bg)]">
       {/* Backdrop solo en móvil */}
       {sidebarOpen && (
@@ -38,6 +41,9 @@ export default function LayoutShell({ children, allowedSections }: LayoutShellPr
           <span className="text-[10.5px] text-[var(--text-muted)] hidden sm:block">REMISION GROUP</span>
         </footer>
       </div>
+
+      <AvisoFechaDatos />
     </div>
+    </EstadoDatosProvider>
   )
 }

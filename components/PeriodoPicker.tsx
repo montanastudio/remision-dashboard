@@ -4,17 +4,12 @@ import { useState, useRef, useEffect } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { filtroLabel } from '@/lib/filtro-ventas'
 import type { FiltroTipo } from '@/lib/filtro-ventas'
+import { useEstadoDatos } from './EstadoDatosContext'
 
 const MESES_FULL = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
   'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
 ]
-
-// Años disponibles: 2023 hasta año actual
-const AÑOS: string[] = Array.from(
-  { length: new Date().getFullYear() - 2022 },
-  (_, i) => String(2023 + i)
-)
 
 const OPCIONES: { id: FiltroTipo; label: string; sub: string }[] = [
   { id: 'actual', label: 'Período actual',     sub: 'Mes más reciente del historial' },
@@ -28,9 +23,15 @@ export default function PeriodoPicker() {
   const router      = useRouter()
   const pathname    = usePathname()
   const searchParams = useSearchParams()
+  const { fechaInfoISO } = useEstadoDatos()
 
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+
+  // Topes según el último día con datos (fecha de información).
+  const maxYear  = fechaInfoISO ? parseInt(fechaInfoISO.slice(0, 4), 10) : new Date().getFullYear()
+  const maxMonth = fechaInfoISO ? parseInt(fechaInfoISO.slice(5, 7), 10) : 12  // 1-based
+  const AÑOS: string[] = Array.from({ length: maxYear - 2022 }, (_, i) => String(2023 + i))
 
   // ── Estado actual en la URL ──────────────────────────────────────────
   const urlFiltro = (searchParams.get('filtro') ?? 'actual') as FiltroTipo
@@ -166,7 +167,7 @@ export default function PeriodoPicker() {
                   className="flex-1 text-[12px] px-2 py-2 rounded-[7px] border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--brand-blue)]"
                 >
                   <option value="">Mes...</option>
-                  {MESES_FULL.map((m, i) => (
+                  {(parseInt(año, 10) >= maxYear ? MESES_FULL.slice(0, maxMonth) : MESES_FULL).map((m, i) => (
                     <option key={i} value={String(i + 1)}>{m}</option>
                   ))}
                 </select>
@@ -190,6 +191,7 @@ export default function PeriodoPicker() {
                 <input
                   type="date"
                   value={desde}
+                  max={fechaInfoISO ?? undefined}
                   onChange={e => setDesde(e.target.value)}
                   className="w-full text-[12px] px-2 py-2 rounded-[7px] border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--brand-blue)]"
                 />
@@ -201,6 +203,7 @@ export default function PeriodoPicker() {
                   value={hasta}
                   onChange={e => setHasta(e.target.value)}
                   min={desde}
+                  max={fechaInfoISO ?? undefined}
                   className="w-full text-[12px] px-2 py-2 rounded-[7px] border border-[var(--border)] bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--brand-blue)]"
                 />
               </div>
