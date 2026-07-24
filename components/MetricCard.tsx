@@ -35,7 +35,7 @@ export default function MetricCard({
     <div
       className={`
         rounded-card border p-[12px_14px] md:p-[16px_18px] bg-[var(--card)] border-[var(--border)]
-        shadow-card hover:shadow-card-hover transition-shadow
+        shadow-card hover:shadow-card-hover transition-shadow min-w-0 overflow-hidden
         ${borderMap[variant]}
       `}
     >
@@ -50,12 +50,12 @@ export default function MetricCard({
         )}
       </div>
       <div
-        className={`font-bold tracking-[-0.5px] leading-tight mb-1 ${
-          String(value).length > 18
-            ? 'text-[13px] md:text-[16px]'
-            : String(value).length > 12
-            ? 'text-[15px] md:text-[20px]'
-            : 'text-[20px] md:text-[26px]'
+        className={`font-bold tracking-[-0.5px] leading-tight mb-1 overflow-hidden ${
+          String(value).length > 15
+            ? 'text-[12px] md:text-[15px]'
+            : String(value).length > 9
+            ? 'text-[15px] md:text-[19px]'
+            : 'text-[19px] md:text-[24px]'
         } ${
           variant === 'good'
             ? 'text-[#22c55e]'
