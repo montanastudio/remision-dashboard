@@ -4,10 +4,12 @@ import { getToken } from 'next-auth/jwt'
 // Rutas que no requieren autenticación
 const PUBLIC_PREFIXES = [
   '/login',
-  '/recuperar',     // Página de recuperación de contraseña
-  '/api/auth',      // NextAuth callbacks, CSRF, session
-  '/api/setup',     // Bootstrap inicial — se auto-bloquea tras crear el primer usuario
-  '/api/recuperar', // Endpoint de recuperación de contraseña
+  '/recuperar',        // Página de recuperación de contraseña
+  '/api/auth',         // NextAuth callbacks, CSRF, session
+  '/api/setup',        // Bootstrap inicial — se auto-bloquea tras crear el primer usuario
+  '/api/recuperar',    // Endpoint de recuperación de contraseña
+  '/api/resumen-diario',   // Reporte a Telegram — se auto-protege con ?token=CRON_SECRET
+  '/api/resumen-mensual',  // Reporte a Telegram — se auto-protege con ?token=CRON_SECRET
 ]
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH'])
