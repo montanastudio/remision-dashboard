@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useTransition } from 'react'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { filtroLabel } from '@/lib/filtro-ventas'
 import type { FiltroTipo } from '@/lib/filtro-ventas'
 import { useEstadoDatos } from './EstadoDatosContext'
+import LoadingOverlay from './LoadingOverlay'
 
 const MESES_FULL = [
   'Enero','Febrero','Marzo','Abril','Mayo','Junio',
@@ -26,6 +27,7 @@ export default function PeriodoPicker() {
   const { fechaInfoISO } = useEstadoDatos()
 
   const [open, setOpen] = useState(false)
+  const [isPending, startTransition] = useTransition()
   const ref = useRef<HTMLDivElement>(null)
 
   // Topes según el último día con datos (fecha de información).
@@ -75,15 +77,19 @@ export default function PeriodoPicker() {
       if (tipo === 'rango') { p.set('desde', desde); p.set('hasta', hasta) }
     }
     const qs = p.toString()
-    router.push(pathname + (qs ? `?${qs}` : ''))
     setOpen(false)
+    startTransition(() => {
+      router.push(pathname + (qs ? `?${qs}` : ''))
+    })
   }
 
   // ── Limpiar filtro ────────────────────────────────────────────────────
   function clear() {
     setTipo('actual'); setMes(''); setDesde(''); setHasta('')
-    router.push(pathname)
     setOpen(false)
+    startTransition(() => {
+      router.push(pathname)
+    })
   }
 
   const isFiltered   = urlFiltro !== 'actual'
@@ -95,6 +101,7 @@ export default function PeriodoPicker() {
     !(tipo === 'rango' && (!desde || !hasta))
 
   return (
+    <>
     <div ref={ref} className="relative">
       {/* ── Botón principal ── */}
       <button
@@ -232,5 +239,8 @@ export default function PeriodoPicker() {
         </div>
       )}
     </div>
+
+    {isPending && <LoadingOverlay label="Aplicando filtro…" />}
+    </>
   )
 }
