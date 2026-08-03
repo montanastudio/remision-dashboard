@@ -163,6 +163,19 @@ const sections: NavSection[] = [
           </svg>
         ),
       },
+      {
+        href: '/feria',
+        section: 'feria',
+        label: 'Feria',
+        icon: (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 21h18" />
+            <path d="M5 21V9l7-5 7 5v12" />
+            <path d="M9 21v-6h6v6" />
+            <circle cx="12" cy="9" r="1.2" />
+          </svg>
+        ),
+      },
     ],
   },
   {

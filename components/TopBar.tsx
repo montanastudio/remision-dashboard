@@ -23,6 +23,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/configuracion/permisos': 'Permisos',
   '/calculadora-precios': 'Calculadora de Precios',
   '/gestion-cartera': 'Gestión Cartera',
+  '/feria': 'Feria',
 }
 
 const PAGE_SUBS: Record<string, string> = {
@@ -38,6 +39,7 @@ const PAGE_SUBS: Record<string, string> = {
   '/configuracion/permisos': 'Control de acceso por rol',
   '/calculadora-precios': 'Simulador de márgenes y precios',
   '/gestion-cartera': 'Seguimiento y cobranza',
+  '/feria': 'Precios y descuentos de feria',
 }
 
 // Páginas donde el filtro de período es relevante (usan LS_VENTAS)
