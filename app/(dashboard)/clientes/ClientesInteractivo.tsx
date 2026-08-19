@@ -18,11 +18,13 @@ type Row = Record<string, string>
 
 interface Cliente {
   _rank: string
+  clave: string
   nit: string
   nombre: string
   ciudad?: string
   unidades: number
   valor: number
+  deuda: number
   vendedor: string
 }
 
@@ -53,6 +55,7 @@ interface ClienteInactivo {
 interface Props {
   todosClientes: Cliente[]
   vendidosCliente: Row[]
+  carteraRows: Row[]
   totalVal: number
   topValor: number
   clientesPorVendedor: VendedorClientes[]
@@ -62,18 +65,18 @@ interface Props {
 
 type Modulo = 'clientes' | 'vendedores' | 'inactivos'
 
-export default function ClientesInteractivo({ todosClientes, vendidosCliente, totalVal, topValor, clientesPorVendedor, clientesInactivos, añoEnCuestion }: Props) {
+export default function ClientesInteractivo({ todosClientes, vendidosCliente, carteraRows, totalVal, topValor, clientesPorVendedor, clientesInactivos, añoEnCuestion }: Props) {
   // Módulo activo (hub de navegación)
   const [moduloActivo, setModuloActivo] = useState<Modulo | null>(null)
-  // Nivel 1: cliente seleccionado
-  const [selectedNit, setSelectedNit] = useState<string | null>(null)
+  // Nivel 1: cliente seleccionado (clave de agrupación REPRESENTA/NIT+nombre)
+  const [selectedClave, setSelectedClave] = useState<string | null>(null)
   // Filtro vendedor para tabla de inactivos
   const [filtroVendedor, setFiltroVendedor] = useState<string>('todos')
   // Búsqueda y expansión en tabla de clientes
   const [busqueda, setBusqueda] = useState<string>('')
   const [expandido, setExpandido] = useState<boolean>(false)
   const FILAS_DEFECTO = 20
-  // Nivel 2: referencia seleccionada
+  // Nivel 2: código seleccionado
   const [selectedRef, setSelectedRef] = useState<string | null>(null)
 
   const nivel2Ref = useRef<HTMLDivElement>(null)
@@ -83,16 +86,18 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
   const vendedorDetalleRef = useRef<HTMLDivElement>(null)
 
 
-  // ── Nivel 2: productos/referencias del cliente seleccionado ──────────
+  // ── Nivel 2: códigos comprados por el cliente seleccionado ───────────
   const nivel2Rows = useMemo(() => {
-    if (!selectedNit) return []
-    const filasCliente = vendidosCliente.filter(r => r['NIT'] === selectedNit)
-    // Agrupar por Referencia
-    const map: Record<string, { referencia: string; marca: string; modelo: string; cantidad: number; valor: number }> = {}
+    if (!selectedClave) return []
+    const filasCliente = vendidosCliente.filter(r => r['Clave'] === selectedClave)
+    // Agrupar por Código: cuántos códigos compra y cuánto por cada uno
+    const map: Record<string, { key: string; codigo: string; referencia: string; marca: string; modelo: string; cantidad: number; valor: number }> = {}
     filasCliente.forEach(r => {
-      const ref = r['Referencia'] || r['Modelo'] || '—'
-      if (!map[ref]) {
-        map[ref] = {
+      const key = r['Código'] || r['Referencia'] || r['Modelo'] || '—'
+      if (!map[key]) {
+        map[key] = {
+          key,
+          codigo:     r['Código']     || '—',
           referencia: r['Referencia'] || '—',
           marca:      r['Marca']      || '',
           modelo:     r['Modelo']     || '',
@@ -100,34 +105,43 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
           valor:      0,
         }
       }
-      map[ref].cantidad += parseNum(r['Cantidad'])
-      map[ref].valor    += parseNum(r['Vr. Bruto ($)'])
+      map[key].cantidad += parseNum(r['Cantidad'])
+      map[key].valor    += parseNum(r['Vr. Bruto ($)'])
     })
     return Object.values(map).sort((a, b) => b.valor - a.valor)
-  }, [selectedNit, vendidosCliente])
+  }, [selectedClave, vendidosCliente])
 
   const maxRef = nivel2Rows[0]?.valor ?? 1
 
-  // ── Nivel 3: facturas del cliente + referencia seleccionados ─────────
+  // ── Deuda del cliente seleccionado (facturas pendientes de cartera) ──
+  const carteraCliente = useMemo(() => {
+    if (!selectedClave) return []
+    return carteraRows
+      .filter(r => r['Clave'] === selectedClave)
+      .sort((a, b) => parseNum(b['Días']) - parseNum(a['Días']))
+  }, [selectedClave, carteraRows])
+  const deudaCliente = carteraCliente.reduce((s, r) => s + parseNum(r['Saldo ($)']), 0)
+
+  // ── Nivel 3: facturas del cliente + código seleccionados ─────────────
   const nivel3Rows = useMemo(() => {
-    if (!selectedNit || !selectedRef) return []
+    if (!selectedClave || !selectedRef) return []
     return vendidosCliente
-      .filter(r => r['NIT'] === selectedNit && (r['Referencia'] || r['Modelo'] || '—') === selectedRef)
+      .filter(r => r['Clave'] === selectedClave && (r['Código'] || r['Referencia'] || r['Modelo'] || '—') === selectedRef)
       .sort((a, b) => {
         // Ordenar por fecha descendente si existe
         const fa = a['Fecha'] ?? '', fb = b['Fecha'] ?? ''
         return fb.localeCompare(fa)
       })
-  }, [selectedNit, selectedRef, vendidosCliente])
+  }, [selectedClave, selectedRef, vendidosCliente])
 
-  const selectedRefData = selectedRef ? nivel2Rows.find(r => r.referencia === selectedRef || (r.referencia === '—' && selectedRef === '—')) : null
+  const selectedRefData = selectedRef ? nivel2Rows.find(r => r.key === selectedRef) : null
 
   // Scroll automático al aparecer cada nivel
   useEffect(() => {
-    if (selectedNit) {
+    if (selectedClave) {
       setTimeout(() => nivel2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
     }
-  }, [selectedNit])
+  }, [selectedClave])
 
   useEffect(() => {
     if (selectedRef) {
@@ -152,7 +166,7 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
     : clientesFiltrados.slice(0, FILAS_DEFECTO)
   const hayMas = !hayBusqueda && !expandido && clientesFiltrados.length > FILAS_DEFECTO
 
-  const selectedCliente = selectedNit ? todosClientes.find(c => c.nit === selectedNit) : null
+  const selectedCliente = selectedClave ? todosClientes.find(c => c.clave === selectedClave) : null
 
   // Inactivos filtrados por vendedor
   const inactivosFiltrados = useMemo(() => {
@@ -176,9 +190,9 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
     ? clientesPorVendedor.find(v => v.vendedor === selectedVendedor) ?? null
     : null
 
-  const toggleCliente = (nit: string) => {
+  const toggleCliente = (clave: string) => {
     setSelectedRef(null)
-    setSelectedNit(prev => prev === nit ? null : nit)
+    setSelectedClave(prev => prev === clave ? null : clave)
   }
 
   const toggleRef = (ref: string) => {
@@ -569,7 +583,7 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
       {moduloActivo === 'clientes' && (
         <>
           <button
-            onClick={() => { setModuloActivo(null); setSelectedNit(null); setSelectedRef(null) }}
+            onClick={() => { setModuloActivo(null); setSelectedClave(null); setSelectedRef(null) }}
             className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] mb-4 transition-colors"
           >
             ← Volver a análisis
@@ -612,7 +626,7 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
           <table className="w-full border-collapse text-[12px]">
             <thead className="sticky top-0 bg-[var(--card)] z-10">
               <tr>
-                {['#', 'Cliente', 'Vendedor', 'Unidades', 'Vr. Bruto', 'Participación'].map((h, i) => (
+                {['#', 'Cliente', 'Vendedor', 'Unidades', 'Vr. Bruto', 'Deuda', 'Participación'].map((h, i) => (
                   <th key={h} className={`px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] ${i >= 3 ? 'text-right' : 'text-left'}`}>
                     {h}
                   </th>
@@ -622,11 +636,11 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
             <tbody>
               {clientesMostrados.map((c) => {
                 const rank = Number(c._rank)
-                const isActive = selectedNit === c.nit
+                const isActive = selectedClave === c.clave
                 return (
                   <tr
-                    key={c.nit}
-                    onClick={() => toggleCliente(c.nit)}
+                    key={c.clave}
+                    onClick={() => toggleCliente(c.clave)}
                     className={`border-b border-[var(--border)] last:border-0 cursor-pointer transition-colors ${
                       isActive
                         ? 'bg-[var(--bar-bg)] ring-1 ring-inset ring-[var(--border)]'
@@ -654,6 +668,11 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
                     <td className="px-[10px] py-[9px] text-right num text-[11px]">
                       <span className="text-[#22c55e]">{fmt(c.valor)}</span>
                     </td>
+                    <td className="px-[10px] py-[9px] text-right num text-[11px]">
+                      {c.deuda > 0
+                        ? <span className="text-[#ef4444] font-semibold">{fmt(c.deuda)}</span>
+                        : <span className="text-[var(--text-muted)]">—</span>}
+                    </td>
                     <td className="px-[10px] py-[9px]">
                       <div className="flex items-center gap-2">
                         <div className="flex-1 h-[4px] bg-[var(--bar-bg)] rounded-full overflow-hidden" style={{ minWidth: 48 }}>
@@ -672,7 +691,7 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
               {/* Fila expandir — aparece cuando hay más de 20 y no está expandido */}
               {hayMas && (
                 <tr>
-                  <td colSpan={6} className="px-[10px] py-[10px] text-center border-t border-[var(--border)]">
+                  <td colSpan={7} className="px-[10px] py-[10px] text-center border-t border-[var(--border)]">
                     <button
                       onClick={() => setExpandido(true)}
                       className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--brand-blue)] hover:underline transition-colors"
@@ -689,7 +708,7 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
               {/* Fila ocultar — cuando está expandido y hay más de 20 */}
               {expandido && !hayBusqueda && clientesFiltrados.length > FILAS_DEFECTO && (
                 <tr>
-                  <td colSpan={6} className="px-[10px] py-[10px] text-center border-t border-[var(--border)]">
+                  <td colSpan={7} className="px-[10px] py-[10px] text-center border-t border-[var(--border)]">
                     <button
                       onClick={() => setExpandido(false)}
                       className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
@@ -707,19 +726,25 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
         </div>
       </Card>
 
-      {/* ══ NIVEL 2: Productos del cliente seleccionado ══ */}
-      {selectedNit && (
+      {/* ══ NIVEL 2: Códigos comprados por el cliente seleccionado ══ */}
+      {selectedClave && (
         <div ref={nivel2Ref} className="mb-4">
           <Card
-            title={`Productos comprados — ${selectedCliente?.nombre ?? selectedNit}`}
-            subtitle="agrupado por referencia · click para ver facturas"
+            title={`Productos comprados — ${selectedCliente?.nombre ?? ''}`}
+            subtitle="agrupado por código · click para ver facturas"
           >
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
               <span className="text-[11px] text-[var(--text-muted)]">
-                {nivel2Rows.length} referencias distintas
+                Compra <span className="font-semibold text-[var(--text)]">{nivel2Rows.length}</span> códigos distintos
+                {selectedCliente ? <> · NIT {selectedCliente.nit}</> : null}
               </span>
+              {deudaCliente > 0 && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-[#ef4444]/10 text-[#ef4444] font-semibold">
+                  Debe {fmt(deudaCliente)} · {carteraCliente.length} factura{carteraCliente.length !== 1 ? 's' : ''}
+                </span>
+              )}
               <button
-                onClick={() => { setSelectedNit(null); setSelectedRef(null) }}
+                onClick={() => { setSelectedClave(null); setSelectedRef(null) }}
                 className="ml-auto text-[10px] px-2 py-0.5 rounded-full border border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--nav-hover)] transition-colors"
               >
                 Cerrar ✕
@@ -729,8 +754,8 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
               <table className="w-full border-collapse text-[12px]">
                 <thead className="sticky top-0 bg-[var(--card)] z-10">
                   <tr>
-                    {['Referencia', 'Marca', 'Modelo', 'Unidades', 'Vr. Bruto', '% del cliente'].map((h, i) => (
-                      <th key={h} className={`px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] ${i >= 3 ? 'text-right' : 'text-left'}`}>
+                    {['Código', 'Referencia', 'Marca', 'Modelo', 'Unidades', 'Vr. Bruto', '% del cliente'].map((h, i) => (
+                      <th key={h} className={`px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] ${i >= 4 ? 'text-right' : 'text-left'}`}>
                         {h}
                       </th>
                     ))}
@@ -738,12 +763,12 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
                 </thead>
                 <tbody>
                   {nivel2Rows.map((row) => {
-                    const isActive = selectedRef === row.referencia
+                    const isActive = selectedRef === row.key
                     const clienteTotal = nivel2Rows.reduce((s, r) => s + r.valor, 0)
                     return (
                       <tr
-                        key={row.referencia}
-                        onClick={() => toggleRef(row.referencia)}
+                        key={row.key}
+                        onClick={() => toggleRef(row.key)}
                         className={`border-b border-[var(--border)] last:border-0 cursor-pointer transition-colors ${
                           isActive
                             ? 'bg-[var(--bar-bg)] ring-1 ring-inset ring-[var(--border)]'
@@ -753,11 +778,12 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
                         <td className="px-[10px] py-[9px]">
                           <div className="flex items-center gap-1.5">
                             <span className={`text-[10px] transition-transform ${isActive ? 'text-[var(--brand-blue)] rotate-90' : 'text-[var(--text-muted)]'}`}>▸</span>
-                            <span className="num text-[11px] text-[var(--text-sub)]">{row.referencia}</span>
+                            <span className="num text-[11px] font-medium text-[var(--text)]">{row.codigo}</span>
                           </div>
                         </td>
+                        <td className="px-[10px] py-[9px] num text-[11px] text-[var(--text-sub)]">{row.referencia}</td>
                         <td className="px-[10px] py-[9px] text-[var(--text-sub)] text-[11px]">{row.marca}</td>
-                        <td className="px-[10px] py-[9px] w-[35%]">
+                        <td className="px-[10px] py-[9px] w-[30%]">
                           <span className="font-medium text-[var(--text)] break-words leading-snug">{row.modelo}</span>
                         </td>
                         <td className="px-[10px] py-[9px] text-right num text-[11px] text-[var(--text-sub)]">
@@ -789,12 +815,57 @@ export default function ClientesInteractivo({ todosClientes, vendidosCliente, to
         </div>
       )}
 
-      {/* ══ NIVEL 3: Facturas del producto seleccionado ══ */}
-      {selectedNit && selectedRef && (
+      {/* ══ CARTERA: facturas pendientes del cliente seleccionado ══ */}
+      {selectedClave && carteraCliente.length > 0 && (
+        <div className="mb-4">
+          <Card
+            title={`Cartera pendiente — ${selectedCliente?.nombre ?? ''}`}
+            subtitle={`${carteraCliente.length} facturas · saldo total ${fmt(deudaCliente)}`}
+          >
+            <div className="table-scroll" style={{ maxHeight: 280 }}>
+              <table className="w-full border-collapse text-[12px]">
+                <thead className="sticky top-0 bg-[var(--card)] z-10">
+                  <tr>
+                    {['Factura', 'Estado', 'Fecha Vence', 'Días', 'Saldo'].map((h, i) => (
+                      <th key={h} className={`px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] ${i >= 2 ? 'text-right' : 'text-left'}`}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {carteraCliente.map((r, i) => {
+                    const dias = parseNum(r['Días'])
+                    const color = dias > 90 ? '#ef4444' : dias > 30 ? '#f97316' : dias > 0 ? '#eab308' : '#22c55e'
+                    return (
+                      <tr key={i} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
+                        <td className="px-[10px] py-[9px] num text-[11px] font-medium text-[var(--text)]">{r['Factura'] || '—'}</td>
+                        <td className="px-[10px] py-[9px] text-[11px] text-[var(--text-sub)]">{r['Estado'] || '—'}</td>
+                        <td className="px-[10px] py-[9px] text-right num text-[11px] text-[var(--text-sub)]">{r['Fecha Vence'] || '—'}</td>
+                        <td className="px-[10px] py-[9px] text-right">
+                          <span className="inline-block text-[10px] font-semibold num px-1.5 py-0.5 rounded" style={{ background: `${color}18`, color }}>
+                            {dias > 0 ? `${fmtN(dias)}d vencida` : 'al día'}
+                          </span>
+                        </td>
+                        <td className="px-[10px] py-[9px] text-right num text-[11px]">
+                          <span className="text-[#ef4444] font-semibold">{fmt(parseNum(r['Saldo ($)']))}</span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ══ NIVEL 3: Facturas del código seleccionado ══ */}
+      {selectedClave && selectedRef && (
         <div ref={nivel3Ref}>
           <Card
-            title={`Facturas — ${selectedRefData?.modelo || selectedRef}`}
-            subtitle={`${selectedCliente?.nombre ?? selectedNit} · ${nivel3Rows.length} líneas`}
+            title={`Facturas — ${selectedRefData?.modelo || selectedRefData?.codigo || selectedRef}`}
+            subtitle={`${selectedCliente?.nombre ?? ''} · código ${selectedRefData?.codigo ?? selectedRef} · ${nivel3Rows.length} líneas`}
           >
             <div className="flex items-center gap-2 mb-3">
               <span className="text-[11px] text-[var(--text-muted)]">

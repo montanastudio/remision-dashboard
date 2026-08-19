@@ -6,6 +6,7 @@ import Card from '@/components/Card'
 import BarRows from '@/components/BarRows'
 import { fmt, fmtN } from '@/lib/format'
 import { parseFecha } from '@/lib/fecha'
+import { claveCliente, nombreCliente, nitBase } from '@/lib/clientes'
 
 type Row = Record<string, string>
 
@@ -97,18 +98,32 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
     setInfoOpen(true)
   }
 
-  // ── Lista de clientes para el selector ────────────────────────────────
+  // ── Lista de clientes para el selector (agrupados por REPRESENTA) ─────
   const clientes = useMemo(() => {
-    const map: Record<string, { nit: string; nombre: string; total: number }> = {}
+    const map: Record<string, { clave: string; nits: Set<string>; nombre: string; total: number }> = {}
     ventas.forEach(r => {
       const nit = (r['IDCLIENTE'] ?? '').trim()
-      if (!nit) return
-      if (!map[nit]) map[nit] = { nit, nombre: (r['NCLIENTE'] ?? '').trim() || nit, total: 0 }
-      map[nit].total += parseN(r['VRTOTAL'])
-      const nombre = (r['NCLIENTE'] ?? '').trim()
-      if (nombre) map[nit].nombre = nombre
+      const nom = (r['NCLIENTE'] ?? '').trim()
+      if (!nit && !nom) return
+      const clave = claveCliente(nit, nom)
+      if (!map[clave]) map[clave] = { clave, nits: new Set(), nombre: nombreCliente(nom) || nitBase(nit), total: 0 }
+      if (nitBase(nit)) map[clave].nits.add(nitBase(nit))
+      map[clave].total += parseN(r['VRTOTAL'])
+      const nombre = nombreCliente(nom)
+      if (nombre) map[clave].nombre = nombre
     })
-    return Object.values(map).sort((a, b) => b.total - a.total)
+    return Object.values(map)
+      .map(c => ({
+        clave:  c.clave,
+        nombre: c.nombre,
+        total:  c.total,
+        nit:    (() => {
+          const nits = Array.from(c.nits)
+          if (nits.length === 0) return '—'
+          return nits.length === 1 ? nits[0] : `${nits[0]} +${nits.length - 1}`
+        })(),
+      }))
+      .sort((a, b) => b.total - a.total)
   }, [ventas])
 
   const q = query.trim().toLowerCase()
@@ -116,13 +131,13 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
     ? clientes.filter(c => c.nombre.toLowerCase().includes(q) || c.nit.toLowerCase().includes(q)).slice(0, 10)
     : clientes.slice(0, 10)
 
-  const cliente = clientes.find(c => c.nit === selectedNIT) ?? null
+  const cliente = clientes.find(c => c.clave === selectedNIT) ?? null
 
   // ── Análisis completo del cliente seleccionado ────────────────────────
   const analisis = useMemo(() => {
     if (!selectedNIT) return null
     const hoy = new Date()
-    const rows = ventas.filter(r => (r['IDCLIENTE'] ?? '').trim() === selectedNIT)
+    const rows = ventas.filter(r => claveCliente(r['IDCLIENTE'], r['NCLIENTE']) === selectedNIT)
     if (rows.length === 0) return null
 
     const pos = rows.filter(r => parseN(r['CANTIDAD']) > 0)
@@ -197,8 +212,11 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
     const costoNeto = rows.reduce((s, r) => s + parseN(r['COSTO']), 0)
     const margenPct = ventaNeta > 0 ? ((ventaNeta - costoNeto) / ventaNeta) * 100 : 0
 
-    // Pagos (RAW_Recibos)
-    const pagos = recibos.filter(r => (r['NIT'] ?? '').trim() === selectedNIT)
+    // Códigos distintos que compra (regla REPRESENTA: qué compra y cuánto)
+    const codigosDistintos = new Set(pos.map(r => (r['CODIGO'] ?? '').trim()).filter(Boolean)).size
+
+    // Pagos (RAW_Recibos) — cruzados con la misma clave de cliente
+    const pagos = recibos.filter(r => claveCliente(r['NIT'], r['Cliente']) === selectedNIT)
     const totalPagado = pagos.reduce((s, r) => s + parseN(r['Total Pagado ($)']), 0)
     const diasPagoPonderado = totalPagado > 0
       ? pagos.reduce((s, r) => s + parseN(r['Días']) * parseN(r['Total Pagado ($)']), 0) / totalPagado
@@ -211,8 +229,8 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
       ? Math.round((fechasPago[fechasPago.length - 1].getTime() - fechasPago[0].getTime()) / (1000 * 60 * 60 * 24) / (fechasPago.length - 1))
       : null
 
-    // Deuda actual (RAW_Cartera)
-    const deudaRows = cartera.filter(r => (r['NIT'] ?? '').trim() === selectedNIT && parseN(r['Saldo ($)']) > 0)
+    // Deuda actual (RAW_Cartera) — cruzada con la misma clave de cliente
+    const deudaRows = cartera.filter(r => claveCliente(r['NIT'], r['Cliente']) === selectedNIT && parseN(r['Saldo ($)']) > 0)
     const deudaTotal   = deudaRows.reduce((s, r) => s + parseN(r['Saldo ($)']), 0)
     const deudaVencida = deudaRows.filter(r => parseN(r['Días']) > 0).reduce((s, r) => s + parseN(r['Saldo ($)']), 0)
     const maxDiasMora  = deudaRows.reduce((m, r) => Math.max(m, parseN(r['Días'])), 0)
@@ -234,7 +252,7 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
     const nivel = RISK_LEVELS.find(l => score >= l.min && score <= l.max) ?? RISK_LEVELS[0]
 
     return {
-      totalHist, undHist, compraAño, compraAñoAnt, compraMes, ticket, nFacturas: facturas.size,
+      totalHist, undHist, codigosDistintos, compraAño, compraAñoAnt, compraMes, ticket, nFacturas: facturas.size,
       primeraCompra, ultimaCompra, diasEntreCompras, diasDesdeUltima, facturasAño,
       topModelos, topMarcas,
       grupos: grupos.length, gruposRepo: gruposRepo.length, pctRepos, topRepos,
@@ -270,10 +288,10 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
         <div className="flex flex-wrap gap-1.5">
           {matches.map(c => (
             <button
-              key={c.nit}
-              onClick={() => setSelectedNIT(p => p === c.nit ? null : c.nit)}
+              key={c.clave}
+              onClick={() => setSelectedNIT(p => p === c.clave ? null : c.clave)}
               className={`text-[11px] font-medium px-2.5 py-[4px] rounded-full border transition-all leading-none max-w-[260px] truncate ${
-                selectedNIT === c.nit
+                selectedNIT === c.clave
                   ? 'bg-[var(--brand-blue)] border-[var(--brand-blue)] text-white'
                   : 'border-[var(--border)] text-[var(--text-sub)] hover:bg-[var(--nav-hover)]'
               }`}
@@ -350,7 +368,7 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
             <div className="rounded-card border border-[var(--border)] bg-[var(--card)] shadow-card p-[14px_16px]">
               <div className="text-[10px] text-[var(--text-muted)]">Compras históricas</div>
               <div className="text-[17px] font-bold num text-[var(--text)]">{fmt(analisis.totalHist)}</div>
-              <div className="text-[10px] text-[var(--text-muted)] num">{fmtN(analisis.undHist)} pares</div>
+              <div className="text-[10px] text-[var(--text-muted)] num">{fmtN(analisis.undHist)} pares · {fmtN(analisis.codigosDistintos)} códigos</div>
             </div>
             <div className="rounded-card border border-[var(--border)] bg-[var(--card)] shadow-card p-[14px_16px]">
               <div className="text-[10px] text-[var(--text-muted)]">Año actual</div>

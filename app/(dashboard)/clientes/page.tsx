@@ -1,4 +1,5 @@
 import { getSheetData, rowsToObjects, normalizeVentasColumns, parseNum, parseFecha } from '@/lib/sheets'
+import { claveCliente, nombreCliente, nitBase } from '@/lib/clientes'
 import { filtrarVentas, filtroLabel } from '@/lib/filtro-ventas'
 import { fmt } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
@@ -50,25 +51,58 @@ export default async function ClientesPage({
   const hoy        = new Date()
   const hace4Meses = new Date(hoy.getFullYear(), hoy.getMonth() - 4, hoy.getDate())
 
+  // ── NITs por cliente (para mostrar; un cliente puede facturar con varios) ─
+  const nitsPorClave: Record<string, Set<string>> = {}
+  rawVentas.forEach(r => {
+    const clave = claveCliente(r['IDCLIENTE'], r['NCLIENTE'])
+    const nb = nitBase(r['IDCLIENTE'])
+    if (!nb) return
+    if (!nitsPorClave[clave]) nitsPorClave[clave] = new Set()
+    nitsPorClave[clave].add(nb)
+  })
+  const nitDisplay = (clave: string): string => {
+    const nits = Array.from(nitsPorClave[clave] ?? [])
+    if (nits.length === 0) return '—'
+    return nits.length === 1 ? nits[0] : `${nits[0]} +${nits.length - 1} NIT${nits.length > 2 ? 's' : ''}`
+  }
+
   // ── Última compra por cliente (historial completo) ─────────────────────
   const ultimaCompraMap: Record<string, { fecha: Date; vendedor: string; nombre: string }> = {}
   rawVentas.forEach(r => {
-    const id = r['IDCLIENTE']?.trim()
-    if (!id) return
+    const clave = claveCliente(r['IDCLIENTE'], r['NCLIENTE'])
+    if (!r['IDCLIENTE']?.trim() && !r['NCLIENTE']?.trim()) return
     const f = parseFecha(r['FECHA'])
     if (!f) return
     const fecha = new Date(f.year, f.mes, f.dia)
-    const actual = ultimaCompraMap[id]
+    const actual = ultimaCompraMap[clave]
     if (!actual || fecha > actual.fecha) {
-      ultimaCompraMap[id] = {
+      ultimaCompraMap[clave] = {
         fecha,
         vendedor: r['NVENDEDOR']?.trim() || '',
-        nombre:   r['NCLIENTE']?.trim()  || id,
+        nombre:   nombreCliente(r['NCLIENTE']) || nitBase(r['IDCLIENTE']),
       }
     }
   })
 
   const totalClientesHistorico = Object.keys(ultimaCompraMap).length
+
+  // ── Deuda por cliente (RAW_Cartera, cruzada con la misma clave) ────────
+  const deudaMap: Record<string, number> = {}
+  const carteraRows: Row[] = []
+  cartera.forEach(r => {
+    const clave = claveCliente(r['NIT'], r['Cliente'])
+    const saldo = parseNum(r['Saldo ($)'])
+    if (saldo <= 0) return
+    deudaMap[clave] = (deudaMap[clave] || 0) + saldo
+    carteraRows.push({
+      'Clave':       clave,
+      'Factura':     r['Factura']      ?? '',
+      'Fecha Vence': r['Fecha Vence']  ?? '',
+      'Días':        r['Días']         ?? '',
+      'Estado':      r['Estado']       ?? '',
+      'Saldo ($)':   r['Saldo ($)']    ?? '',
+    })
+  })
 
   // ── Año en cuestión: se deriva del filtro activo ───────────────────────
   const añoEnCuestion: number = (() => {
@@ -92,20 +126,21 @@ export default async function ClientesPage({
   // Nombre más reciente por cliente en el año
   const nombreRecienteMap: Record<string, string> = {}
   ventasAño.forEach(r => {
-    const id = r['IDCLIENTE']?.trim()
-    if (id) nombreRecienteMap[id] = r['NCLIENTE']?.trim() || id
+    const clave = claveCliente(r['IDCLIENTE'], r['NCLIENTE'])
+    const nombre = nombreCliente(r['NCLIENTE'])
+    if (nombre) nombreRecienteMap[clave] = nombre
   })
 
   const vendedorClientesDetalleMap: Record<string, Map<string, boolean>> = {}
   ventasAño.forEach(r => {
     const vendedor = r['NVENDEDOR']?.trim() || 'Sin asignar'
-    const cliente  = r['IDCLIENTE']?.trim()
-    if (!cliente) return
+    if (!r['IDCLIENTE']?.trim() && !r['NCLIENTE']?.trim()) return
+    const clave = claveCliente(r['IDCLIENTE'], r['NCLIENTE'])
     if (!vendedorClientesDetalleMap[vendedor]) vendedorClientesDetalleMap[vendedor] = new Map()
-    if (!vendedorClientesDetalleMap[vendedor].has(cliente)) {
-      const ultima = ultimaCompraMap[cliente]
+    if (!vendedorClientesDetalleMap[vendedor].has(clave)) {
+      const ultima = ultimaCompraMap[clave]
       const activo = ultima ? ultima.fecha >= hace4Meses : false
-      vendedorClientesDetalleMap[vendedor].set(cliente, activo)
+      vendedorClientesDetalleMap[vendedor].set(clave, activo)
     }
   })
 
@@ -114,11 +149,11 @@ export default async function ClientesPage({
 
   const clientesPorVendedor = Object.entries(vendedorClientesDetalleMap)
     .map(([vendedor, clientesMap]) => {
-      const clientes = Array.from(clientesMap.entries()).map(([nit, activo]) => {
-        const ultima = ultimaCompraMap[nit]
+      const clientes = Array.from(clientesMap.entries()).map(([clave, activo]) => {
+        const ultima = ultimaCompraMap[clave]
         return {
-          nit,
-          nombre:         nombreRecienteMap[nit] || ultima?.nombre || nit,
+          nit:            nitDisplay(clave),
+          nombre:         nombreRecienteMap[clave] || ultima?.nombre || nitDisplay(clave),
           activo,
           ultimaCompra:   ultima ? fmtFecha(ultima.fecha) : '—',
           diasSinComprar: ultima
@@ -142,8 +177,8 @@ export default async function ClientesPage({
   // ── Clientes inactivos globales (para la card de alerta) ───────────────
   const clientesInactivos = Object.entries(ultimaCompraMap)
     .filter(([, d]) => d.fecha < hace4Meses)
-    .map(([nit, d]) => ({
-      nit,
+    .map(([clave, d]) => ({
+      nit:            nitDisplay(clave),
       nombre:         d.nombre,
       vendedor:       d.vendedor,
       ultimaCompra:   fmtFecha(d.fecha),
@@ -157,31 +192,33 @@ export default async function ClientesPage({
     vendVentas: Record<string, number>
   }> = {}
   ventas.forEach(r => {
-    const id   = r['IDCLIENTE']?.trim() || r['NCLIENTE']?.trim()
-    if (!id) return
+    if (!r['IDCLIENTE']?.trim() && !r['NCLIENTE']?.trim()) return
+    const clave = claveCliente(r['IDCLIENTE'], r['NCLIENTE'])
     const vend = r['NVENDEDOR']?.trim() || ''
     const val  = parseNum(r['VRTOTAL'])
-    if (!cliMap[id]) {
-      cliMap[id] = {
-        nombre:     r['NCLIENTE']?.trim() || id,
+    if (!cliMap[clave]) {
+      cliMap[clave] = {
+        nombre:     nombreCliente(r['NCLIENTE']) || nitBase(r['IDCLIENTE']),
         unidades:   0,
         valor:      0,
         ciudad:     r['CIUDAD']?.trim() || '',
         vendVentas: {},
       }
     }
-    cliMap[id].unidades += parseNum(r['CANTIDAD'])
-    cliMap[id].valor    += val
-    if (vend) cliMap[id].vendVentas[vend] = (cliMap[id].vendVentas[vend] || 0) + val
+    cliMap[clave].unidades += parseNum(r['CANTIDAD'])
+    cliMap[clave].valor    += val
+    if (vend) cliMap[clave].vendVentas[vend] = (cliMap[clave].vendVentas[vend] || 0) + val
   })
 
   const clientes = Object.entries(cliMap)
-    .map(([nit, d]) => ({
-      nit,
+    .map(([clave, d]) => ({
+      clave,
+      nit:      nitDisplay(clave),
       nombre:   d.nombre,
       unidades: d.unidades,
       valor:    d.valor,
       ciudad:   d.ciudad,
+      deuda:    deudaMap[clave] || 0,
       // vendedor con mayor facturación al cliente en el período
       vendedor: Object.entries(d.vendVentas).sort((a, b) => b[1] - a[1])[0]?.[0] || '',
     }))
@@ -192,21 +229,25 @@ export default async function ClientesPage({
 
   const todosClientes = clientes.map((c, i) => ({
     _rank:    String(i + 1),
+    clave:    c.clave,
     nit:      c.nit,
     nombre:   c.nombre,
     ciudad:   c.ciudad,
     unidades: c.unidades,
     valor:    c.valor,
+    deuda:    c.deuda,
     vendedor: c.vendedor,
   }))
 
   // Construir vendidosCliente con la forma que espera ClientesInteractivo
   // Mapear nuevos nombres de columna a los que usa el componente
   const vendidosCliente: Row[] = ventas.map(r => ({
+    'Clave':         claveCliente(r['IDCLIENTE'], r['NCLIENTE']),
     'NIT':           r['IDCLIENTE']  ?? '',
     'Cliente':       r['NCLIENTE']   ?? '',
     'Factura':       r['FACTURA']    ?? '',
     'Fecha':         r['FECHA']      ?? '',
+    'Código':        r['CODIGO']     ?? '',
     'Referencia':    r['REFERENCIA'] ?? '',
     'Marca':         r['NGRUPO']     ?? '',
     'Modelo':        r['PRODUCTO']   ?? '',
@@ -242,6 +283,7 @@ export default async function ClientesPage({
       <ClientesInteractivo
         todosClientes={todosClientes}
         vendidosCliente={vendidosCliente}
+        carteraRows={carteraRows}
         totalVal={totalVal}
         topValor={topCliente?.valor ?? 1}
         clientesPorVendedor={clientesPorVendedor}
