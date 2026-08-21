@@ -8,6 +8,7 @@ import {
   rowsToObjects as rowsToObjectsCartera, todayISO, carteraErrorMessage,
 } from '@/lib/sheets-cartera'
 import { normalizeCarteraRows, BUCKET_ORDER } from '@/lib/cartera-normalize'
+import { notasResumen } from '@/lib/notas-resumen'
 
 async function authCheck() {
   const session = await getServerSession(authOptions)
@@ -61,10 +62,12 @@ export async function GET() {
   // 2. Gestión meta
   let metaRows: Record<string, string>[] = []
   let reminderRows: Record<string, string>[] = []
+  let notasRows: Record<string, string>[] = []
   try {
     metaRows = rowsToObjectsCartera(await getCarteraSheet('GC_ClienteMeta'))
     // 3. Pending reminders count per client
     reminderRows = rowsToObjectsCartera(await getCarteraSheet('GC_Recordatorios'))
+    notasRows = rowsToObjectsCartera(await getCarteraSheet('GC_Notas'))
   } catch (e) {
     return NextResponse.json({ error: carteraErrorMessage(e) }, { status: 500 })
   }
@@ -79,6 +82,8 @@ export async function GET() {
     }
   }
 
+  const notasPorNit = notasResumen(notasRows)
+
   // 4. Merge
   const clientes = baseClientes.map((c) => ({
     nit:           c.nit,
@@ -89,7 +94,11 @@ export async function GET() {
     vendedores:    Array.from(c._vendedores),
     listaId:               metaMap[c.nit]?.['ListaID'] ?? '',
     contactadoHoy:         metaMap[c.nit]?.['ContactadoFecha'] === today,
+    contactadoFecha:       metaMap[c.nit]?.['ContactadoFecha'] ?? '',
+    contactadoPor:         metaMap[c.nit]?.['GestionadoPor'] ?? '',
     recordatoriosPendientes: reminderCount[c.nit] ?? 0,
+    ultimaNota:            notasPorNit[c.nit]?.ultima ?? null,
+    notasCount:            notasPorNit[c.nit]?.total ?? 0,
   }))
 
   return NextResponse.json({ clientes, vendedores: allVendedores })
@@ -108,10 +117,20 @@ export async function PATCH(req: NextRequest) {
     const current = metaRows.find((r) => r['NIT'] === nit) ?? {}
 
     const today = todayISO()
+
+    // Tres estados distintos: marcar (hoy), desmarcar (limpiar) y no tocar
+    // (mover de lista) — antes `false` conservaba la fecha y desmarcar no
+    // surtía efecto.
+    const contactadoFecha =
+      contactado === true  ? today :
+      contactado === false ? '' :
+      (current['ContactadoFecha'] ?? '')
+
+    // Solo se registra autor si esta llamada cambió algo del cliente
     const values = [
       nit,
       listaId !== undefined ? listaId : (current['ListaID'] ?? ''),
-      contactado ? today : (current['ContactadoFecha'] ?? ''),
+      contactadoFecha,
       user.name ?? '',
       today,
     ]

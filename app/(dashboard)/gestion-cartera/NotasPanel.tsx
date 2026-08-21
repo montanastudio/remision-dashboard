@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { hoyBogota } from '@/lib/hoy-bogota'
 
 interface Nota {
   ID: string; NIT: string; Fecha: string; Hora: string
@@ -38,7 +39,7 @@ export default function NotasPanel({ nit, nombre, saldo, onClose }: Props) {
   const [fechaRec, setFechaRec] = useState('')
   const [descRec, setDescRec] = useState('')
 
-  const today = new Date().toISOString().slice(0, 10)
+  const today = hoyBogota()
 
   const load = useCallback(async () => {
     setLoading(true)

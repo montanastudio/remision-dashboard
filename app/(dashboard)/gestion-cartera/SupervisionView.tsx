@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { BUCKET_ORDER, BUCKETS_CANONICOS } from '@/lib/cartera-normalize'
+import { hoyBogota, diaBogota } from '@/lib/hoy-bogota'
 
 interface Nota {
   ID: string; NIT: string; Fecha: string; Hora: string
@@ -48,12 +49,8 @@ function fmtK(n: number) {
   return '$' + Math.round(n).toLocaleString('es-CO')
 }
 
-function toISO(d: Date) { return d.toISOString().slice(0, 10) }
-
 function getDesde(days: number): string {
-  const d = new Date()
-  d.setDate(d.getDate() - days)
-  return toISO(d)
+  return diaBogota(-days)
 }
 
 function fmtFecha(iso: string) {
@@ -61,12 +58,17 @@ function fmtFecha(iso: string) {
   return `${d}/${m}/${y}`
 }
 
-/** Lista de fechas ISO desde `desde` hasta `hasta`, ambas inclusive. */
+/**
+ * Lista de fechas ISO desde `desde` hasta `hasta`, ambas inclusive.
+ * Recorre en UTC puro sobre fechas ya normalizadas a Colombia, así que
+ * no vuelve a aplicar desfase horario.
+ */
 function rangoDias(desde: string, hasta: string): string[] {
   const out: string[] = []
   const d = new Date(desde + 'T12:00:00Z')
-  while (toISO(d) <= hasta) {
-    out.push(toISO(d))
+  const iso = (x: Date) => x.toISOString().slice(0, 10)
+  while (iso(d) <= hasta) {
+    out.push(iso(d))
     d.setUTCDate(d.getUTCDate() + 1)
   }
   return out
@@ -82,7 +84,7 @@ export default function SupervisionView({ clientes }: Props) {
   const [loadError, setLoadError] = useState('')
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
 
-  const today = toISO(new Date())
+  const today = hoyBogota()
 
   useEffect(() => {
     Promise.all([

@@ -1,11 +1,22 @@
 'use client'
 
 import { useState } from 'react'
+import { iniciales } from '@/lib/notas-resumen'
+import { hoyBogota, diaBogota } from '@/lib/hoy-bogota'
 
+export interface UltimaNota {
+  usuario: string; fecha: string; hora: string; tipo: string
+}
 export interface Cliente {
   nit: string; nombre: string; saldo: number; bucket: string
   diasVencido: number; listaId: string; contactadoHoy: boolean
   recordatoriosPendientes: number; vendedores: string[]
+  /** Quién registró la última nota y cuándo — para ver actividad del equipo */
+  ultimaNota: UltimaNota | null
+  notasCount: number
+  /** Quién marcó el contacto y en qué fecha (puede ser de días anteriores) */
+  contactadoFecha: string
+  contactadoPor: string
 }
 export interface Lista { ID: string; Nombre: string; Color: string; Orden: string }
 
@@ -22,6 +33,55 @@ const BUCKET_BADGE: Record<string, { bg: string; text: string }> = {
   '+90 días':   { bg: 'bg-red-100 dark:bg-red-950/60',       text: 'text-red-800 dark:text-red-300' },
   '61-90 días': { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-600 dark:text-orange-400' },
   '31-60 días': { bg: 'bg-orange-100 dark:bg-orange-950/60', text: 'text-orange-500 dark:text-orange-400' },
+}
+
+/** "hoy" / "ayer" / "12/08" a partir de un ISO YYYY-MM-DD. */
+function fechaCorta(iso: string): string {
+  if (!iso) return ''
+  if (iso === hoyBogota()) return 'hoy'
+  if (iso === diaBogota(-1)) return 'ayer'
+  const p = iso.split('-')
+  return p.length === 3 ? `${p[2]}/${p[1]}` : iso
+}
+
+const TIPO_NOTA: Record<string, { label: string; color: string }> = {
+  llamada: { label: 'llamó',   color: '#3b82f6' },
+  mensaje: { label: 'escribió', color: '#8b5cf6' },
+  visita:  { label: 'visitó',  color: '#14b8a6' },
+  abono:   { label: 'abono',   color: '#22c55e' },
+  nota:    { label: 'nota',    color: '#64748b' },
+}
+
+/** Quién hizo la última gestión — clave cuando varios usuarios comparten tablero. */
+function ActividadCliente({ c }: { c: Cliente }) {
+  const n = c.ultimaNota
+  // Sin notas, al menos mostrar quién marcó el contacto y cuándo
+  if (!n) {
+    if (!c.contactadoFecha || !c.contactadoPor) return null
+    return (
+      <div className="flex items-center gap-1 mt-1.5 text-[9px] text-[var(--text-muted)]">
+        <span className="truncate">
+          contactado {fechaCorta(c.contactadoFecha)} por {c.contactadoPor.split(' ')[0]}
+        </span>
+      </div>
+    )
+  }
+  const t = TIPO_NOTA[n.tipo] ?? TIPO_NOTA.nota
+  return (
+    <div className="flex items-center gap-1.5 mt-1.5" title={`${n.usuario} · ${n.tipo} · ${n.fecha} ${n.hora}`}>
+      <span
+        className="w-[15px] h-[15px] rounded-full flex-shrink-0 text-white text-[8px] font-bold flex items-center justify-center"
+        style={{ background: t.color }}>
+        {iniciales(n.usuario)}
+      </span>
+      <span className="text-[9px] text-[var(--text-muted)] truncate">
+        {n.usuario.split(' ')[0]} {t.label} {fechaCorta(n.fecha)}
+      </span>
+      {c.notasCount > 1 && (
+        <span className="text-[9px] text-[var(--text-muted)] ml-auto flex-shrink-0">{c.notasCount} notas</span>
+      )}
+    </div>
+  )
 }
 
 function fmt(n: number) {
@@ -90,11 +150,15 @@ export default function KanbanBoard({
   }
 
   async function marcarContactado(nit: string, contactadoHoy: boolean) {
-    onClienteUpdate(nit, { contactadoHoy: !contactadoHoy })
+    const marcar = !contactadoHoy
+    onClienteUpdate(nit, {
+      contactadoHoy: marcar,
+      contactadoFecha: marcar ? hoyBogota() : '',
+    })
     await fetch('/api/gestion-cartera/clientes', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nit, contactado: !contactadoHoy }),
+      body: JSON.stringify({ nit, contactado: marcar }),
     })
   }
 
@@ -399,10 +463,15 @@ export default function KanbanBoard({
 
                     {/* Bucket */}
                     {c.bucket && bs && (
-                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold mb-2 ${bs.bg} ${bs.text}`}>
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold ${bs.bg} ${bs.text}`}>
                         {c.bucket}
                       </span>
                     )}
+
+                    {/* Quién hizo la última gestión */}
+                    <div className="mb-2">
+                      <ActividadCliente c={c} />
+                    </div>
 
                     {/* Actions */}
                     <div className="flex items-center gap-1.5 mt-1" onClick={(e) => e.stopPropagation()}>

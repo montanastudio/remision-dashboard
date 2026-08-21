@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { hoyBogota } from '@/lib/hoy-bogota'
 
 export interface Recordatorio {
   ID: string; NIT: string; FechaRecordar: string; Descripcion: string
@@ -17,7 +18,7 @@ interface Props {
 }
 
 function hoyISO() {
-  return new Date().toISOString().slice(0, 10)
+  return hoyBogota()
 }
 
 /** 'YYYY-MM-DD' → 'DD/MM/YYYY' para mostrar. */

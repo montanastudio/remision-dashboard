@@ -1,4 +1,5 @@
 import { google } from 'googleapis'
+import { hoyBogota, horaBogota } from './hoy-bogota'
 
 function spreadsheetId(): string {
   const id = process.env.GOOGLE_SHEETS_ID_CARTERA
@@ -166,10 +167,11 @@ export function genId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+// Zona horaria de Colombia — ver lib/hoy-bogota.ts
 export function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  return hoyBogota()
 }
 
 export function nowTime(): string {
-  return new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
+  return horaBogota()
 }

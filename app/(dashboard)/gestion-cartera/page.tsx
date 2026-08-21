@@ -5,6 +5,7 @@ import { getPermissions, canAccess } from '@/lib/permissions'
 import { getSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
 import { getCarteraSheet, rowsToObjects as gcRows, todayISO } from '@/lib/sheets-cartera'
 import { normalizeCarteraRows, BUCKET_ORDER } from '@/lib/cartera-normalize'
+import { notasResumen } from '@/lib/notas-resumen'
 import GestionCarteraClient from './GestionCarteraClient'
 
 export const dynamic = 'force-dynamic'
@@ -54,10 +55,16 @@ export default async function GestionCarteraPage() {
   let metaRows: Record<string, string>[] = []
   let listasRows: Record<string, string>[] = []
   let recordatoriosRows: Record<string, string>[] = []
+  let notasRows: Record<string, string>[] = []
 
   try { metaRows        = gcRows(await getCarteraSheet('GC_ClienteMeta'))   } catch { /* */ }
   try { listasRows      = gcRows(await getCarteraSheet('GC_Listas'))        } catch { /* */ }
   try { recordatoriosRows = gcRows(await getCarteraSheet('GC_Recordatorios')) } catch { /* */ }
+  try { notasRows       = gcRows(await getCarteraSheet('GC_Notas'))         } catch { /* */ }
+
+  // Última nota por cliente: quién la escribió y cuándo. Alimenta el
+  // indicador de actividad del tablero cuando hay varios usuarios.
+  const notasPorNit = notasResumen(notasRows)
 
   const metaMap: Record<string, Record<string, string>> = {}
   for (const r of metaRows) { if (r['NIT']) metaMap[r['NIT']] = r }
@@ -80,7 +87,11 @@ export default async function GestionCarteraPage() {
     vendedores:  Array.from(c._vendedores),
     listaId:                metaMap[c.nit]?.['ListaID'] ?? '',
     contactadoHoy:          metaMap[c.nit]?.['ContactadoFecha'] === today,
+    contactadoFecha:        metaMap[c.nit]?.['ContactadoFecha'] ?? '',
+    contactadoPor:          metaMap[c.nit]?.['GestionadoPor'] ?? '',
     recordatoriosPendientes: reminderCount[c.nit] ?? 0,
+    ultimaNota:             notasPorNit[c.nit]?.ultima ?? null,
+    notasCount:             notasPorNit[c.nit]?.total ?? 0,
   }))
 
   const listas = listasRows
