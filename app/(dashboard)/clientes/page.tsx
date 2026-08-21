@@ -79,7 +79,7 @@ export default async function ClientesPage({
       ultimaCompraMap[clave] = {
         fecha,
         vendedor: r['NVENDEDOR']?.trim() || '',
-        nombre:   nombreCliente(r['NCLIENTE']) || nitBase(r['IDCLIENTE']),
+        nombre:   nombreCliente(r['NCLIENTE'], r['IDCLIENTE']) || nitBase(r['IDCLIENTE']),
       }
     }
   })
@@ -127,7 +127,7 @@ export default async function ClientesPage({
   const nombreRecienteMap: Record<string, string> = {}
   ventasAño.forEach(r => {
     const clave = claveCliente(r['IDCLIENTE'], r['NCLIENTE'])
-    const nombre = nombreCliente(r['NCLIENTE'])
+    const nombre = nombreCliente(r['NCLIENTE'], r['IDCLIENTE'])
     if (nombre) nombreRecienteMap[clave] = nombre
   })
 
@@ -198,7 +198,7 @@ export default async function ClientesPage({
     const val  = parseNum(r['VRTOTAL'])
     if (!cliMap[clave]) {
       cliMap[clave] = {
-        nombre:     nombreCliente(r['NCLIENTE']) || nitBase(r['IDCLIENTE']),
+        nombre:     nombreCliente(r['NCLIENTE'], r['IDCLIENTE']) || nitBase(r['IDCLIENTE']),
         unidades:   0,
         valor:      0,
         ciudad:     r['CIUDAD']?.trim() || '',

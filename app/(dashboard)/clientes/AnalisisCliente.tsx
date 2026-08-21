@@ -106,10 +106,10 @@ export default function AnalisisCliente({ ventas, recibos, cartera }: Props) {
       const nom = (r['NCLIENTE'] ?? '').trim()
       if (!nit && !nom) return
       const clave = claveCliente(nit, nom)
-      if (!map[clave]) map[clave] = { clave, nits: new Set(), nombre: nombreCliente(nom) || nitBase(nit), total: 0 }
+      if (!map[clave]) map[clave] = { clave, nits: new Set(), nombre: nombreCliente(nom, nit) || nitBase(nit), total: 0 }
       if (nitBase(nit)) map[clave].nits.add(nitBase(nit))
       map[clave].total += parseN(r['VRTOTAL'])
-      const nombre = nombreCliente(nom)
+      const nombre = nombreCliente(nom, nit)
       if (nombre) map[clave].nombre = nombre
     })
     return Object.values(map)

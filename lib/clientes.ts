@@ -48,31 +48,51 @@ export function baseSucursal(rep: string): string {
 const CONSOLIDAR_BASES = new Set(['TITINOS'])
 
 /**
+ * NITs donde el REPRESENTA del ERP no identifica al cliente (trae marcadores
+ * como "NO UTILIZAR" o ciudades sueltas): se agrupan por el nombre completo
+ * (razón social) dentro del NIT. Pedido del usuario 2026-08-20 para
+ * RODRIGUEZ MEDINA SERGIO ZAMIR; agregar aquí los NITs de casos iguales.
+ */
+const AGRUPAR_POR_NOMBRE_COMPLETO = new Set([
+  '80802180-0', // RODRIGUEZ MEDINA SERGIO ZAMIR (/NO UTILIZAR y /FUNZA)
+])
+
+/**
  * Clave de agrupación del cliente.
  * Con REPRESENTA → la clave es el nombre comercial (une NITs del mismo dueño
  * y separa clientes que facturan por el mismo NIT). Las tiendas numeradas de
  * las bases en CONSOLIDAR_BASES ("40 TITINOS", "41 TITINOS"…) se consolidan
  * en un solo cliente, siempre dentro del mismo NIT (el nombre base sin NIT
  * uniría dueños distintos con tiendas homónimas).
+ * NITs en AGRUPAR_POR_NOMBRE_COMPLETO → razón social dentro del NIT.
  * Sin REPRESENTA → NIT base + nombre normalizado.
  */
 export function claveCliente(nit: string | undefined, nombre: string | undefined): string {
+  const nb = nitBase(nit)
+  if (AGRUPAR_POR_NOMBRE_COMPLETO.has(nb)) {
+    const rs = razonSocial(nombre).replace(/\s+/g, ' ').trim().toUpperCase()
+    return 'N|' + nb + '|' + rs
+  }
   const rep = parseRepresenta(nombre)
   if (rep) {
     const repU = rep.toUpperCase()
     const base = baseSucursal(rep).toUpperCase()
-    if (base !== repU && CONSOLIDAR_BASES.has(base)) return 'R|' + base + '|' + nitBase(nit)
+    if (base !== repU && CONSOLIDAR_BASES.has(base)) return 'R|' + base + '|' + nb
     return 'R|' + repU
   }
   const nom = (nombre ?? '').replace(/\s+/g, ' ').trim().toUpperCase()
-  return 'N|' + nitBase(nit) + '|' + nom
+  return 'N|' + nb + '|' + nom
 }
 
 /**
  * Nombre a mostrar: el REPRESENTA si existe, si no el nombre completo.
- * Para las bases consolidadas se muestra el nombre sin número de tienda.
+ * Para las bases consolidadas se muestra el nombre sin número de tienda, y
+ * para los NITs de AGRUPAR_POR_NOMBRE_COMPLETO la razón social completa.
  */
-export function nombreCliente(nombre: string | undefined): string {
+export function nombreCliente(nombre: string | undefined, nit?: string): string {
+  if (nit !== undefined && AGRUPAR_POR_NOMBRE_COMPLETO.has(nitBase(nit))) {
+    return razonSocial(nombre) || (nombre ?? '').trim()
+  }
   const rep = parseRepresenta(nombre)
   if (!rep) return (nombre ?? '').trim()
   const base = baseSucursal(rep)
