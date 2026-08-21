@@ -40,11 +40,12 @@ interface Props {
   onClienteUpdate: (nit: string, changes: Partial<Cliente>) => void
   onListaCreada: (lista: Lista) => void
   onListaActualizada: (lista: Lista) => void
+  onListasReordenadas: (listas: Lista[]) => void
   onListaEliminada: (id: string) => void
 }
 
 export default function KanbanBoard({
-  clientes, listas, selectedNIT, infoNIT, onSelectClient, onInfoClient, onClienteUpdate, onListaCreada, onListaActualizada, onListaEliminada,
+  clientes, listas, selectedNIT, infoNIT, onSelectClient, onInfoClient, onClienteUpdate, onListaCreada, onListaActualizada, onListasReordenadas, onListaEliminada,
 }: Props) {
   const [movingNIT, setMovingNIT] = useState<string | null>(null)
   const [showNuevaLista, setShowNuevaLista] = useState(false)
@@ -153,6 +154,28 @@ export default function KanbanBoard({
     } finally {
       setSavingEdit(false)
     }
+  }
+
+  // Mueve una lista un puesto a la izquierda (-1) o a la derecha (+1).
+  // Se aplica de inmediato en pantalla y se persiste el orden completo.
+  async function moverLista(id: string, delta: number) {
+    const desde = listas.findIndex((l) => l.ID === id)
+    const hasta = desde + delta
+    if (desde === -1 || hasta < 0 || hasta >= listas.length) return
+
+    setMenuListaId(null)
+    const nuevo = [...listas]
+    const [movida] = nuevo.splice(desde, 1)
+    nuevo.splice(hasta, 0, movida)
+
+    const reordenadas = nuevo.map((l, i) => ({ ...l, Orden: String(i + 1) }))
+    onListasReordenadas(reordenadas)
+
+    await fetch('/api/gestion-cartera/listas', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orden: reordenadas.map((l) => l.ID) }),
+    }).catch(() => {})
   }
 
   async function eliminarLista(id: string) {
@@ -295,7 +318,27 @@ export default function KanbanBoard({
                   {menuListaId === col.id && (
                     <>
                       <div className="fixed inset-0 z-20" onClick={() => setMenuListaId(null)} />
-                      <div className="absolute right-0 top-full mt-1 z-30 rounded-[8px] border bg-[var(--card)] border-[var(--border)] shadow-xl py-1 w-40">
+                      <div className="absolute right-0 top-full mt-1 z-30 rounded-[8px] border bg-[var(--card)] border-[var(--border)] shadow-xl py-1 w-48">
+                        {(() => {
+                          const pos = listas.findIndex((l) => l.ID === col.id)
+                          return (
+                            <>
+                              <button
+                                onClick={() => moverLista(col.id, -1)}
+                                disabled={pos <= 0}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-[var(--text-sub)] hover:bg-[var(--bar-bg)] hover:text-[var(--text)] transition-colors disabled:opacity-30 disabled:hover:bg-transparent">
+                                <span className="text-[13px] leading-none">←</span> Mover a la izquierda
+                              </button>
+                              <button
+                                onClick={() => moverLista(col.id, 1)}
+                                disabled={pos === -1 || pos >= listas.length - 1}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-[11px] text-[var(--text-sub)] hover:bg-[var(--bar-bg)] hover:text-[var(--text)] transition-colors disabled:opacity-30 disabled:hover:bg-transparent">
+                                <span className="text-[13px] leading-none">→</span> Mover a la derecha
+                              </button>
+                              <div className="my-1 border-t border-[var(--border)]" />
+                            </>
+                          )
+                        })()}
                         <button
                           onClick={() => {
                             const l = listas.find((x) => x.ID === col.id)

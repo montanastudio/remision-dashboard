@@ -16,13 +16,19 @@ async function authCheck() {
   return session.user as { name?: string; role?: string }
 }
 
+/** Orden numérico; las listas sin Orden válido van al final. */
+function porOrden(a: Record<string, string>, b: Record<string, string>) {
+  const na = Number(a['Orden']), nb = Number(b['Orden'])
+  return (isNaN(na) ? Infinity : na) - (isNaN(nb) ? Infinity : nb)
+}
+
 export async function GET() {
   const user = await authCheck()
   if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
   try {
     const rows = await getCarteraSheet('GC_Listas')
-    const listas = rowsToObjects(rows)
+    const listas = rowsToObjects(rows).filter((l) => l['ID']).sort(porOrden)
     return NextResponse.json({ listas })
   } catch (e) {
     return NextResponse.json({ error: carteraErrorMessage(e) }, { status: 500 })
@@ -38,7 +44,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const rows = await getCarteraSheet('GC_Listas')
-    const orden = String(rows.length) // rows includes header
+
+    // Va al final: uno más que el Orden más alto. No usar rows.length, que
+    // colisiona con los órdenes renumerados al reordenar columnas.
+    const maxOrden = rowsToObjects(rows)
+      .map((l) => Number(l['Orden']))
+      .filter((n) => !isNaN(n))
+      .reduce((m, n) => Math.max(m, n), 0)
+    const orden = String(maxOrden + 1)
 
     const id = genId()
     const colorFinal = color || '#3b82f6'
@@ -66,7 +79,41 @@ export async function PATCH(req: NextRequest) {
   const user = await authCheck()
   if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
-  const { id, nombre, color } = await req.json()
+  const { id, nombre, color, orden } = await req.json()
+
+  // Reordenar: llega el arreglo de IDs en el orden deseado y se renumera
+  // la columna Orden de todas las listas de una sola escritura.
+  if (Array.isArray(orden)) {
+    try {
+      const rows = await getCarteraSheet('GC_Listas')
+      if (rows.length < 2) return NextResponse.json({ error: 'Sin listas' }, { status: 404 })
+
+      const header = rows[0]
+      const idIdx    = header.indexOf('ID')
+      const ordenIdx = header.indexOf('Orden')
+      if (ordenIdx === -1) {
+        return NextResponse.json({ error: 'La hoja GC_Listas no tiene columna Orden' }, { status: 500 })
+      }
+
+      const posicion = new Map<string, number>(orden.map((x: string, i: number) => [x, i + 1]))
+      const data = rows.slice(1).map((r) => {
+        const fila = [...r]
+        while (fila.length < header.length) fila.push('')
+        const pos = posicion.get(fila[idIdx])
+        // Las que no vengan en el arreglo quedan al final, conservando su orden.
+        if (pos !== undefined) fila[ordenIdx] = String(pos)
+        return fila
+      })
+
+      await setCarteraSheet('GC_Listas', [header, ...data])
+
+      const listas = rowsToObjects([header, ...data]).filter((l) => l['ID']).sort(porOrden)
+      return NextResponse.json({ ok: true, listas })
+    } catch (e) {
+      return NextResponse.json({ error: carteraErrorMessage(e) }, { status: 500 })
+    }
+  }
+
   if (!id) return NextResponse.json({ error: 'ID requerido' }, { status: 400 })
   if (nombre !== undefined && !nombre?.trim()) {
     return NextResponse.json({ error: 'El nombre no puede quedar vacío' }, { status: 400 })

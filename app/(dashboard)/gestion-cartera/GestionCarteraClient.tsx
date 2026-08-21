@@ -78,6 +78,10 @@ export default function GestionCarteraClient({
     setListas((prev) => prev.map((l) => l.ID === lista.ID ? { ...l, ...lista } : l))
   }
 
+  function handleListasReordenadas(nuevas: Lista[]) {
+    setListas(nuevas)
+  }
+
   function handleListaEliminada(id: string) {
     setListas((prev) => prev.filter((l) => l.ID !== id))
     setClientes((prev) => prev.map((c) => c.listaId === id ? { ...c, listaId: '' } : c))
@@ -160,6 +164,7 @@ export default function GestionCarteraClient({
               onClienteUpdate={handleClienteUpdate}
               onListaCreada={handleListaCreada}
               onListaActualizada={handleListaActualizada}
+              onListasReordenadas={handleListasReordenadas}
               onListaEliminada={handleListaEliminada}
             />
           </div>
