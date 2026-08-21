@@ -40,6 +40,106 @@ function esCanal(nombre: string): boolean {
   return CANALES.some(c => n.includes(c) || c.includes(n))
 }
 
+interface FacturaCli { factura: string; fecha: Date | null; valor: number; costo: number; cant: number }
+interface ClienteVentana {
+  nit: string; nombre: string; nFact: number; valor: number; costo: number
+  cant: number; margen: number; ultima: Date | null; facturas: FacturaCli[]
+}
+
+/**
+ * "Activos" mide compras en los últimos 4 meses. Con ventanas de 3 meses ese
+ * corte queda dentro del período y el dato sería siempre igual al total, así
+ * que ahí se muestra solo el conteo.
+ */
+function subtituloClientes(
+  d: { activos: number; total: number },
+  ventana: VentanaCli
+): string {
+  const label = VENTANAS_CLI.find(v => v.id === ventana)?.label.toLowerCase() ?? ''
+  if (ventana === '3m') return `${fmtN(d.total)} clientes · ${label}`
+  return `${fmtN(d.activos)} activos de ${fmtN(d.total)} · ${label}`
+}
+
+/** Agrupa la fila del cliente con su fila expandida sin romper el <tbody>. */
+function FragmentoCli({ children }: { children: React.ReactNode }) {
+  return <>{children}</>
+}
+
+function CaretCli({ abierto }: { abierto: boolean }) {
+  return (
+    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+      strokeLinecap="round" strokeLinejoin="round"
+      className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${abierto ? 'rotate-90' : ''}`}>
+      <path d="M9 18l6-6-6-6" />
+    </svg>
+  )
+}
+
+/** Ficha del cliente: resumen + sus facturas en la ventana elegida. */
+function DetalleCliente({ cliente }: { cliente: ClienteVentana }) {
+  const util = cliente.valor - cliente.costo
+  const ticket = cliente.nFact > 0 ? cliente.valor / cliente.nFact : 0
+  const resumen = [
+    { l: 'NIT',            v: cliente.nit },
+    { l: 'Facturas',       v: fmtN(cliente.nFact) },
+    { l: 'Unidades',       v: fmtN(cliente.cant) },
+    { l: 'Ticket promedio', v: fmt(ticket) },
+    { l: 'Última compra',  v: cliente.ultima ? fmtFecha(cliente.ultima) : '—' },
+    { l: 'Utilidad',       v: cliente.costo > 0 ? fmt(util) : '—' },
+  ]
+  return (
+    <div className="rounded-[6px] border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1.5 px-3 py-2.5 border-b border-[var(--border)]">
+        {resumen.map(x => (
+          <div key={x.l}>
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)]">{x.l}</div>
+            <div className="text-[11px] font-semibold text-[var(--text)] num truncate">{x.v}</div>
+          </div>
+        ))}
+      </div>
+      <table className="w-full border-collapse text-[11px]">
+        <thead>
+          <tr>
+            {['Factura', 'Fecha', 'Cant.', 'Valor', 'Margen'].map((h, i) => (
+              <th key={h} className={`px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] ${i >= 2 ? 'text-right' : 'text-left'}`}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {cliente.facturas.slice(0, 12).map(f => {
+            const m = f.valor > 0 && f.costo > 0 ? ((f.valor - f.costo) / f.valor) * 100 : null
+            return (
+              <tr key={f.factura} className="border-b border-[var(--border)] last:border-0">
+                <td className="px-2.5 py-1.5 num text-[var(--text)]">{f.factura}</td>
+                <td className="px-2.5 py-1.5 num text-[var(--text-sub)]">{f.fecha ? fmtFecha(f.fecha) : '—'}</td>
+                <td className="px-2.5 py-1.5 text-right num text-[var(--text-sub)]">{fmtN(f.cant)}</td>
+                <td className="px-2.5 py-1.5 text-right num text-[var(--text)]">{fmtM(f.valor)}</td>
+                <td className={`px-2.5 py-1.5 text-right num ${m === null ? 'text-[var(--text-muted)]' : m < 0 ? 'text-[#ef4444] font-semibold' : 'text-[var(--text-sub)]'}`}>
+                  {m === null ? '—' : `${m.toFixed(1)}%`}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {cliente.facturas.length > 12 && (
+        <div className="px-3 py-1.5 text-[9px] text-[var(--text-muted)] text-center border-t border-[var(--border)]">
+          y {fmtN(cliente.facturas.length - 12)} facturas más en el período
+        </div>
+      )}
+    </div>
+  )
+}
+
+type VentanaCli = '3m' | '6m' | '12m' | 'todo'
+
+const VENTANAS_CLI: { id: VentanaCli; label: string; meses: number | null }[] = [
+  { id: '3m',   label: '3 meses',  meses: 3 },
+  { id: '6m',   label: '6 meses',  meses: 6 },
+  { id: '12m',  label: '12 meses', meses: 12 },
+  { id: 'todo', label: 'Todo',     meses: null },
+]
+
 // ── Meta dinámica ────────────────────────────────────────────────────────────
 // Meta del mes = MAX(mismo mes año anterior × (1+crecimiento), promedio últimos
 // 3 meses reales). Si cumplió el mes anterior, la meta sube a lo logrado +escalón.
@@ -126,6 +226,8 @@ interface Props {
 
 export default function AnalisisVendedores({ ventas, cartera, recibos }: Props) {
   const [selected, setSelected] = useState<string | null>(null)
+  const [ventanaCli, setVentanaCli] = useState<VentanaCli>('12m')
+  const [cliAbierto, setCliAbierto] = useState<string | null>(null)
   const [infoOpen, setInfoOpen] = useState(false)
   const [infoPos, setInfoPos] = useState<{ top: number; right: number } | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'ok' | 'err'>('idle')
@@ -310,6 +412,80 @@ export default function AnalisisVendedores({ ventas, cartera, recibos }: Props) 
   const personas = stats.filter(s => !s.canal && s.ytd > 0)
   const canales  = stats.filter(s => s.canal)
   const perfil = stats.find(s => s.nombre === selected) ?? null
+
+  // ── Clientes del vendedor, recalculados según la ventana elegida ──────
+  // Se computa aparte de `stats` (que alimenta el ranking y siempre mira
+  // todo el histórico) para que la tarjeta "Sus Clientes" pueda acotarse
+  // en el tiempo sin alterar el score.
+  const clientesVentana = useMemo(() => {
+    if (!selected) return null
+
+    const meses = VENTANAS_CLI.find(v => v.id === ventanaCli)?.meses ?? null
+    const hoy = new Date()
+    const desde = meses === null
+      ? null
+      : new Date(hoy.getFullYear(), hoy.getMonth() - meses, hoy.getDate())
+    const hace4m = new Date(hoy.getFullYear(), hoy.getMonth() - 4, hoy.getDate())
+
+    interface Fact { factura: string; fecha: Date | null; valor: number; costo: number; cant: number }
+    interface Cli {
+      nit: string; nombre: string; valor: number; costo: number; cant: number
+      ultima: Date | null; facturas: Map<string, Fact>
+    }
+    const map: Record<string, Cli> = {}
+
+    for (const r of ventas) {
+      if ((r['NVENDEDOR'] ?? '').trim() !== selected) continue
+      const cant = parseN(r['CANTIDAD'])
+      if (cant <= 0) continue
+      const nit = (r['IDCLIENTE'] ?? '').trim()
+      if (!nit) continue
+      const d = toDate(r['FECHA'])
+      if (desde && (!d || d < desde)) continue
+
+      const valor = parseN(r['VRTOTAL'])
+      const costo = parseN(r['COSTO'])
+      map[nit] ??= { nit, nombre: (r['NCLIENTE'] ?? '').trim() || nit, valor: 0, costo: 0, cant: 0, ultima: null, facturas: new Map() }
+      const c = map[nit]
+      c.valor += valor
+      c.costo += costo
+      c.cant  += cant
+      if (d && (!c.ultima || d > c.ultima)) c.ultima = d
+
+      const nf = (r['FACTURA'] ?? '').trim() || '(sin factura)'
+      const f = c.facturas.get(nf) ?? { factura: nf, fecha: d, valor: 0, costo: 0, cant: 0 }
+      f.valor += valor; f.costo += costo; f.cant += cant
+      if (d && (!f.fecha || d > f.fecha)) f.fecha = d
+      c.facturas.set(nf, f)
+    }
+
+    const arr = Object.values(map).map(c => ({
+      nit: c.nit,
+      nombre: c.nombre,
+      nFact: c.facturas.size,
+      valor: c.valor,
+      costo: c.costo,
+      cant: c.cant,
+      margen: c.valor > 0 ? ((c.valor - c.costo) / c.valor) * 100 : 0,
+      ultima: c.ultima,
+      facturas: Array.from(c.facturas.values()).sort((a, b) => (b.fecha?.getTime() ?? 0) - (a.fecha?.getTime() ?? 0)),
+    }))
+
+    // "Más rentable" exige un mínimo de facturas para que una venta suelta
+    // con margen alto no se lleve el puesto.
+    const conMin = arr.filter(c => c.nFact >= 3)
+    const base = conMin.length > 0 ? conMin : arr
+
+    return {
+      lista: arr.slice().sort((a, b) => b.valor - a.valor),
+      total: arr.length,
+      activos: arr.filter(c => c.ultima && c.ultima >= hace4m).length,
+      valorTotal: arr.reduce((s, c) => s + c.valor, 0),
+      topFrecuencia: arr.slice().sort((a, b) => b.nFact - a.nFact)[0] ?? null,
+      topValor:      arr.slice().sort((a, b) => b.valor - a.valor)[0] ?? null,
+      topRentable:   base.slice().sort((a, b) => b.margen - a.margen)[0] ?? null,
+    }
+  }, [ventas, selected, ventanaCli])
 
   async function guardarMetas() {
     if (saveState === 'saving') return
@@ -534,41 +710,106 @@ export default function AnalisisVendedores({ ventas, cartera, recibos }: Props) 
 
           {/* Clientes + Cartera */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <Card title="Sus Clientes" subtitle={`${fmtN(perfil.clientesActivos)} activos de ${fmtN(perfil.clientes12m)} en 12 meses`}>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-                {[
-                  { t: 'Más frecuente', v: perfil.topFrecuencia?.nombre, d: perfil.topFrecuencia ? `${fmtN(perfil.topFrecuencia.nFact)} facturas` : '—' },
-                  { t: 'Mayor volumen', v: perfil.topValor?.nombre, d: perfil.topValor ? fmt(perfil.topValor.valor) : '—' },
-                  { t: 'Más rentable',  v: perfil.topRentable?.nombre, d: perfil.topRentable ? `${perfil.topRentable.margen.toFixed(1)}% margen` : '—' },
-                ].map(x => (
-                  <div key={x.t} className="px-2.5 py-2 rounded-[8px] bg-[var(--bar-bg)]">
-                    <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">{x.t}</div>
-                    <div className="text-[11px] font-semibold text-[var(--text)] truncate" title={x.v ?? ''}>{x.v ?? '—'}</div>
-                    <div className="text-[10px] text-[var(--text-muted)] num">{x.d}</div>
-                  </div>
-                ))}
-              </div>
-              <table className="w-full border-collapse text-[12px]">
-                <thead>
-                  <tr>
-                    {[{ l: 'Cliente', a: 'left' }, { l: 'Fact.', a: 'right' }, { l: 'Valor', a: 'right' }, { l: 'Margen', a: 'right' }].map(h => (
-                      <th key={h.l} className={`px-[8px] py-[7px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] text-${h.a}`}>{h.l}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {perfil.topClientes.map((c, i) => (
-                    <tr key={`${c.nombre}-${i}`} className="border-b border-[var(--border)] last:border-0">
-                      <td className="px-[8px] py-[7px] text-[var(--text-sub)] max-w-[180px] truncate">{c.nombre}</td>
-                      <td className="px-[8px] py-[7px] text-right num text-[11px] text-[var(--text-sub)]">{fmtN(c.nFact)}</td>
-                      <td className="px-[8px] py-[7px] text-right num text-[11px] text-[var(--text)]">{fmtM(c.valor)}</td>
-                      <td className={`px-[8px] py-[7px] text-right num text-[11px] ${c.margen >= 25 ? 'text-[#22c55e]' : c.margen >= 10 ? 'text-[var(--text-sub)]' : 'text-[#ef4444]'}`}>
-                        {c.margen.toFixed(1)}%
-                      </td>
-                    </tr>
+            <Card
+              title="Sus Clientes"
+              subtitle={clientesVentana ? subtituloClientes(clientesVentana, ventanaCli) : undefined}>
+
+              {/* Ventana de tiempo */}
+              <div className="flex items-center gap-1.5 mb-3">
+                <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mr-0.5">Período</span>
+                <div className="flex rounded-[6px] border border-[var(--border)] overflow-hidden">
+                  {VENTANAS_CLI.map(v => (
+                    <button key={v.id}
+                      onClick={() => { setVentanaCli(v.id); setCliAbierto(null) }}
+                      className={`px-2.5 py-1 text-[10px] font-medium transition-colors ${
+                        ventanaCli === v.id
+                          ? 'bg-[var(--brand-blue)] text-white'
+                          : 'text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
+                      }`}>
+                      {v.label}
+                    </button>
                   ))}
-                </tbody>
-              </table>
+                </div>
+                {clientesVentana && (
+                  <span className="ml-auto text-[10px] text-[var(--text-muted)] num">{fmtM(clientesVentana.valorTotal)}</span>
+                )}
+              </div>
+
+              {!clientesVentana || clientesVentana.total === 0 ? (
+                <div className="py-8 text-center text-[12px] text-[var(--text-muted)]">
+                  Sin clientes en este período
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                    {[
+                      { t: 'Más frecuente', c: clientesVentana.topFrecuencia, d: (c: { nFact: number }) => `${fmtN(c.nFact)} facturas` },
+                      { t: 'Mayor volumen', c: clientesVentana.topValor,      d: (c: { valor: number }) => fmt(c.valor) },
+                      { t: 'Más rentable',  c: clientesVentana.topRentable,   d: (c: { margen: number }) => `${c.margen.toFixed(1)}% margen` },
+                    ].map(x => (
+                      <button key={x.t}
+                        onClick={() => x.c && setCliAbierto(prev => prev === x.c!.nit ? null : x.c!.nit)}
+                        disabled={!x.c}
+                        className={`px-2.5 py-2 rounded-[8px] text-left transition-colors ${
+                          x.c && cliAbierto === x.c.nit
+                            ? 'bg-[var(--brand-blue)]/10 ring-1 ring-[var(--brand-blue)]'
+                            : 'bg-[var(--bar-bg)] hover:bg-[var(--nav-hover)]'
+                        } disabled:cursor-default`}>
+                        <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">{x.t}</div>
+                        <div className="text-[11px] font-semibold text-[var(--text)] truncate" title={x.c?.nombre ?? ''}>{x.c?.nombre ?? '—'}</div>
+                        <div className="text-[10px] text-[var(--text-muted)] num">{x.c ? x.d(x.c as never) : '—'}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <table className="w-full border-collapse text-[12px]">
+                    <thead>
+                      <tr>
+                        {[{ l: 'Cliente', a: 'left' }, { l: 'Fact.', a: 'right' }, { l: 'Valor', a: 'right' }, { l: 'Margen', a: 'right' }].map(h => (
+                          <th key={h.l} className={`px-[8px] py-[7px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] text-${h.a}`}>{h.l}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {clientesVentana.lista.slice(0, 8).map(c => {
+                        const abierto = cliAbierto === c.nit
+                        return (
+                          <FragmentoCli key={c.nit}>
+                            <tr
+                              onClick={() => setCliAbierto(prev => prev === c.nit ? null : c.nit)}
+                              className={`border-b border-[var(--border)] cursor-pointer transition-colors ${abierto ? 'bg-[var(--bar-bg)]' : 'hover:bg-[var(--nav-hover)]'}`}>
+                              <td className="px-[8px] py-[7px] text-[var(--text-sub)] max-w-[180px] truncate">
+                                <span className="inline-flex items-center gap-1.5">
+                                  <CaretCli abierto={abierto} />
+                                  {c.nombre}
+                                </span>
+                              </td>
+                              <td className="px-[8px] py-[7px] text-right num text-[11px] text-[var(--text-sub)]">{fmtN(c.nFact)}</td>
+                              <td className="px-[8px] py-[7px] text-right num text-[11px] text-[var(--text)]">{fmtM(c.valor)}</td>
+                              <td className={`px-[8px] py-[7px] text-right num text-[11px] ${c.margen >= 25 ? 'text-[#22c55e]' : c.margen >= 10 ? 'text-[var(--text-sub)]' : 'text-[#ef4444]'}`}>
+                                {c.margen.toFixed(1)}%
+                              </td>
+                            </tr>
+                            {abierto && (
+                              <tr className="border-b border-[var(--border)]">
+                                <td colSpan={4} className="px-[8px] py-2 bg-[var(--bar-bg)]">
+                                  <DetalleCliente cliente={c} />
+                                </td>
+                              </tr>
+                            )}
+                          </FragmentoCli>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+
+                  {clientesVentana.total > 8 && (
+                    <div className="mt-2 text-[10px] text-[var(--text-muted)] text-center">
+                      Mostrando los 8 de mayor valor de {fmtN(clientesVentana.total)} clientes
+                    </div>
+                  )}
+                </>
+              )}
             </Card>
 
             <Card title="Calidad de Cartera" subtitle="las facturas que este vendedor genera">
