@@ -15,6 +15,7 @@ export interface FilaVenta {
   grupo: string
   cantidad: number
   valor: number
+  costo: number
 }
 
 type Agrupacion = 'detalle' | 'factura' | 'producto'
@@ -31,6 +32,46 @@ function normalizar(s: string): string {
 }
 
 const MAX_FILAS = 300
+
+/** Margen sobre venta. Devuelve null si no hay base para calcularlo. */
+function margenPct(valor: number, costo: number): number | null {
+  if (valor === 0 || costo === 0) return null
+  return ((valor - costo) / valor) * 100
+}
+
+function MargenTexto({ valor, costo }: { valor: number; costo: number }) {
+  const m = margenPct(valor, costo)
+  if (m === null) return <span className="num text-[var(--text-muted)]">—</span>
+  return <span className={`num ${m >= 0 ? '' : 'text-red-500 font-semibold'}`}>{m.toFixed(1)}%</span>
+}
+
+function ThCosto({ clase }: { clase: string }) {
+  return (
+    <>
+      <th className={`${clase} text-right`}>Costo</th>
+      <th className={`${clase} text-right`}>Utilidad</th>
+      <th className={`${clase} text-right`}>Margen</th>
+    </>
+  )
+}
+
+/** Celdas de Costo / Utilidad / Margen — se repiten en las tres vistas. */
+function CeldasCosto({ valor, costo, clase }: { valor: number; costo: number; clase: string }) {
+  const util = valor - costo
+  const m = margenPct(valor, costo)
+  return (
+    <>
+      <td className={`${clase} text-right num`}>{costo > 0 ? fmt(costo) : '—'}</td>
+      <td className={`${clase} text-right num`}>
+        <span className={util >= 0 ? 'text-[var(--text-sub)]' : 'text-red-500'}>{costo > 0 ? fmt(util) : '—'}</span>
+      </td>
+      <td className={`${clase} text-right num`}>
+        {m === null ? <span className="text-[var(--text-muted)]">—</span>
+          : <span className={m >= 0 ? 'text-[var(--text-sub)]' : 'text-red-500 font-semibold'}>{m.toFixed(1)}%</span>}
+      </td>
+    </>
+  )
+}
 
 /** Agrupa la fila del grupo con su fila expandida sin romper el <tbody>. */
 function FragmentoGrupo({ children }: { children: ReactNode }) {
@@ -51,7 +92,9 @@ interface SubFila { key: string; celdas: ReactNode[] }
 
 /** Tabla anidada que muestra las líneas que componen un grupo. */
 function SubTabla({ encabezados, filas }: { encabezados: string[]; filas: SubFila[] }) {
-  const alinearDerecha = (i: number) => i >= encabezados.length - 2
+  // Todo lo numérico va a la derecha: desde 'Cant.' hasta el final.
+  const primeraNumerica = encabezados.indexOf('Cant.')
+  const alinearDerecha = (i: number) => primeraNumerica !== -1 && i >= primeraNumerica
   return (
     <div className="rounded-[6px] border border-[var(--border)] bg-[var(--card)] overflow-hidden">
       <table className="w-full border-collapse text-[11px]">
@@ -94,6 +137,7 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
   const [vendedoresSel, setVendedoresSel] = useState<string[]>([])
   const [agrupacion, setAgrupacionState] = useState<Agrupacion>('detalle')
   const [expandidos, setExpandidos] = useState<string[]>([])
+  const [verCosto, setVerCosto] = useState(false)
 
   // Cambiar de agrupación invalida las claves expandidas
   function setAgrupacion(a: Agrupacion) {
@@ -140,23 +184,26 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
 
   const totalValor = filtradas.reduce((s, f) => s + f.valor, 0)
   const totalCant  = filtradas.reduce((s, f) => s + f.cantidad, 0)
+  const totalCosto = filtradas.reduce((s, f) => s + f.costo, 0)
+  const totalUtil  = totalValor - totalCosto
 
   // Agrupaciones
   const porFactura = useMemo(() => {
     if (agrupacion !== 'factura') return []
     const map: Record<string, {
       factura: string; fecha: string; cliente: string; nit: string
-      vendedor: string; items: number; cantidad: number; valor: number
+      vendedor: string; items: number; cantidad: number; valor: number; costo: number
       lineas: FilaVenta[]
     }> = {}
     for (const f of filtradas) {
       const k = f.factura || '(sin factura)'
       if (!map[k]) {
-        map[k] = { factura: k, fecha: f.fecha, cliente: f.cliente, nit: f.nit, vendedor: f.vendedor, items: 0, cantidad: 0, valor: 0, lineas: [] }
+        map[k] = { factura: k, fecha: f.fecha, cliente: f.cliente, nit: f.nit, vendedor: f.vendedor, items: 0, cantidad: 0, valor: 0, costo: 0, lineas: [] }
       }
       map[k].items    += 1
       map[k].cantidad += f.cantidad
       map[k].valor    += f.valor
+      map[k].costo    += f.costo
       map[k].lineas.push(f)
     }
     return Object.values(map).sort((a, b) => b.valor - a.valor)
@@ -166,19 +213,20 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
     if (agrupacion !== 'producto') return []
     const map: Record<string, {
       referencia: string; producto: string; grupo: string
-      facturas: Set<string>; clientes: Set<string>; cantidad: number; valor: number
+      facturas: Set<string>; clientes: Set<string>; cantidad: number; valor: number; costo: number
       lineas: FilaVenta[]
     }> = {}
     for (const f of filtradas) {
       const k = f.referencia || f.producto || '(sin referencia)'
       if (!map[k]) {
-        map[k] = { referencia: k, producto: f.producto, grupo: f.grupo, facturas: new Set(), clientes: new Set(), cantidad: 0, valor: 0, lineas: [] }
+        map[k] = { referencia: k, producto: f.producto, grupo: f.grupo, facturas: new Set(), clientes: new Set(), cantidad: 0, valor: 0, costo: 0, lineas: [] }
       }
       if (!map[k].producto && f.producto) map[k].producto = f.producto
       if (f.factura) map[k].facturas.add(f.factura)
       if (f.nit) map[k].clientes.add(f.nit)
       map[k].cantidad += f.cantidad
       map[k].valor    += f.valor
+      map[k].costo    += f.costo
       map[k].lineas.push(f)
     }
     return Object.values(map).sort((a, b) => b.valor - a.valor)
@@ -223,6 +271,18 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
               </button>
             )}
           </div>
+
+          {/* Costo */}
+          <button
+            onClick={() => setVerCosto((v) => !v)}
+            title="Agrega columnas de costo, utilidad y margen"
+            className={`px-3 py-2 rounded-[6px] text-[11px] font-medium border transition-colors flex-shrink-0 ${
+              verCosto
+                ? 'bg-[var(--brand-blue)] text-white border-[var(--brand-blue)]'
+                : 'border-[var(--border)] text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
+            }`}>
+            {verCosto ? '✓ Costo' : '+ Costo'}
+          </button>
 
           {/* Agrupación */}
           <div className="flex rounded-[6px] border border-[var(--border)] overflow-hidden flex-shrink-0">
@@ -283,6 +343,19 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
         <span className="text-[11px] text-[var(--text-sub)]">
           <span className="font-semibold text-[#22c55e] num">{fmt(totalValor)}</span>
         </span>
+        {verCosto && totalCosto > 0 && (
+          <>
+            <span className="text-[11px] text-[var(--text-sub)]">
+              costo <span className="font-semibold text-[var(--text)] num">{fmt(totalCosto)}</span>
+            </span>
+            <span className="text-[11px] text-[var(--text-sub)]">
+              margen{' '}
+              <span className={`font-semibold num ${totalUtil >= 0 ? 'text-[var(--text)]' : 'text-red-500'}`}>
+                {((totalUtil / totalValor) * 100).toFixed(1)}%
+              </span>
+            </span>
+          </>
+        )}
         {agrupacion !== 'detalle' && (
           <span className="text-[10px] text-[var(--text-muted)] ml-auto">
             Clic en una fila para ver el detalle
@@ -309,6 +382,7 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
                     <th className={`${thBase} text-right`}>Ítems</th>
                     <th className={`${thBase} text-right`}>Cant.</th>
                     <th className={`${thBase} text-right`}>Vr. Total</th>
+                    {verCosto && <ThCosto clase={thBase} />}
                   </>
                 ) : agrupacion === 'producto' ? (
                   <>
@@ -319,6 +393,7 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
                     <th className={`${thBase} text-right`}>Clientes</th>
                     <th className={`${thBase} text-right`}>Cant.</th>
                     <th className={`${thBase} text-right`}>Vr. Total</th>
+                    {verCosto && <ThCosto clase={thBase} />}
                   </>
                 ) : (
                   <>
@@ -330,6 +405,7 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
                     <th className={`${thBase} text-left`}>Fecha</th>
                     <th className={`${thBase} text-right`}>Cant.</th>
                     <th className={`${thBase} text-right`}>Vr. Total</th>
+                    {verCosto && <ThCosto clase={thBase} />}
                   </>
                 )}
               </tr>
@@ -353,12 +429,13 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
                       <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(f.items)}</td>
                       <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(f.cantidad)}</td>
                       <td className={`${tdBase} text-right num text-[11px]`}><span className="text-[#22c55e]">{fmt(f.valor)}</span></td>
+                      {verCosto && <CeldasCosto valor={f.valor} costo={f.costo} clase={`${tdBase} text-[11px]`} />}
                     </tr>
                     {abierto && (
                       <tr className="border-b border-[var(--border)]">
-                        <td colSpan={7} className="px-[10px] py-2 bg-[var(--bar-bg)]">
+                        <td colSpan={verCosto ? 10 : 7} className="px-[10px] py-2 bg-[var(--bar-bg)]">
                           <SubTabla
-                            encabezados={['Referencia', 'Producto', 'Grupo', 'Cant.', 'Vr. Total']}
+                            encabezados={['Referencia', 'Producto', 'Grupo', 'Cant.', 'Vr. Total', ...(verCosto ? ['Costo', 'Margen'] : [])]}
                             filas={[...f.lineas].sort((a, b) => b.valor - a.valor).map((l, i) => ({
                               key: `${l.referencia}-${i}`,
                               celdas: [
@@ -367,6 +444,10 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
                                 <span key="g">{l.grupo}</span>,
                                 <span key="c" className="num">{fmtN(l.cantidad)}</span>,
                                 <span key="v" className="num text-[#22c55e]">{fmt(l.valor)}</span>,
+                                ...(verCosto ? [
+                                  <span key="co" className="num">{l.costo > 0 ? fmt(l.costo) : '—'}</span>,
+                                  <MargenTexto key="mg" valor={l.valor} costo={l.costo} />,
+                                ] : []),
                               ],
                             }))}
                           />
@@ -395,12 +476,13 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
                       <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(p.clientes.size)}</td>
                       <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(p.cantidad)}</td>
                       <td className={`${tdBase} text-right num text-[11px]`}><span className="text-[#22c55e]">{fmt(p.valor)}</span></td>
+                      {verCosto && <CeldasCosto valor={p.valor} costo={p.costo} clase={`${tdBase} text-[11px]`} />}
                     </tr>
                     {abierto && (
                       <tr className="border-b border-[var(--border)]">
-                        <td colSpan={7} className="px-[10px] py-2 bg-[var(--bar-bg)]">
+                        <td colSpan={verCosto ? 10 : 7} className="px-[10px] py-2 bg-[var(--bar-bg)]">
                           <SubTabla
-                            encabezados={['Factura', 'Fecha', 'Cliente', 'Vendedor', 'Cant.', 'Vr. Total']}
+                            encabezados={['Factura', 'Fecha', 'Cliente', 'Vendedor', 'Cant.', 'Vr. Total', ...(verCosto ? ['Costo', 'Margen'] : [])]}
                             filas={[...p.lineas].sort((a, b) => b.valor - a.valor).map((l, i) => ({
                               key: `${l.factura}-${i}`,
                               celdas: [
@@ -410,6 +492,10 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
                                 <span key="v" className="block max-w-[140px] truncate">{l.vendedor}</span>,
                                 <span key="q" className="num">{fmtN(l.cantidad)}</span>,
                                 <span key="t" className="num text-[#22c55e]">{fmt(l.valor)}</span>,
+                                ...(verCosto ? [
+                                  <span key="co" className="num">{l.costo > 0 ? fmt(l.costo) : '—'}</span>,
+                                  <MargenTexto key="mg" valor={l.valor} costo={l.costo} />,
+                                ] : []),
                               ],
                             }))}
                           />
@@ -430,6 +516,7 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
                   <td className={`${tdBase} num text-[11px]`}>{f.fecha}</td>
                   <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(f.cantidad)}</td>
                   <td className={`${tdBase} text-right num text-[11px]`}><span className="text-[#22c55e]">{fmt(f.valor)}</span></td>
+                  {verCosto && <CeldasCosto valor={f.valor} costo={f.costo} clase={`${tdBase} text-[11px]`} />}
                 </tr>
               ))}
             </tbody>

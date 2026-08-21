@@ -77,6 +77,7 @@ export default async function VentasPage({
     grupo:      r['NGRUPO']     ?? '',
     cantidad:   parseNum(r['CANTIDAD']),
     valor:      parseNum(r['VRTOTAL']),
+    costo:      parseNum(r['COSTO']),
   }))
 
   return (
