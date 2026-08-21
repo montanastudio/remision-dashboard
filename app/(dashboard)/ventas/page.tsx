@@ -16,7 +16,6 @@ export default async function VentasPage({
 }) {
   const sp = (k: string) => (Array.isArray(searchParams[k]) ? searchParams[k]![0] : searchParams[k] ?? undefined)
   const filtroParams = { filtro: sp('filtro'), m: sp('m'), y: sp('y'), desde: sp('desde'), hasta: sp('hasta') }
-  const periodoLabel = filtroLabel(filtroParams)
 
   type Row = Record<string, string>
   let rawVentas: Row[] = []
@@ -28,6 +27,7 @@ export default async function VentasPage({
   }
 
   const ventas = filtrarVentas(rawVentas, filtroParams)
+  const periodoLabel = filtroLabel(filtroParams, ventas[0]?.['FECHA'])
 
   const totalVr = ventas.reduce((s, r) => s + parseNum(r['VRTOTAL']), 0)
   const totalQ  = ventas.reduce((s, r) => s + parseNum(r['CANTIDAD']), 0)

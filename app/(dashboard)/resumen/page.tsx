@@ -20,7 +20,6 @@ export default async function ResumenPage({
   // Normalizar searchParams (siempre string)
   const sp = (k: string) => (Array.isArray(searchParams[k]) ? searchParams[k]![0] : searchParams[k] ?? undefined)
   const filtroParams = { filtro: sp('filtro'), m: sp('m'), y: sp('y'), desde: sp('desde'), hasta: sp('hasta') }
-  const periodoLabel = filtroLabel(filtroParams)
   type Row = Record<string, string>
   let ventas: Row[] = []
   let carteraRes: Row[] = []
@@ -72,6 +71,7 @@ export default async function ResumenPage({
   // El gráfico de tendencia usa TODOS los datos (para ver comparación anual).
   // Los MetricCards, rankings y totales usan los datos FILTRADOS.
   const ventasFiltradas = filtrarVentas(ventas, filtroParams)
+  const periodoLabel = filtroLabel(filtroParams, ventasFiltradas[0]?.['FECHA'])
 
   // ── Tendencias (gráfico — datos SIN filtrar para mantener contexto anual) ──
   const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']

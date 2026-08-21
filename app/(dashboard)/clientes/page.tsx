@@ -16,7 +16,6 @@ export default async function ClientesPage({
 }) {
   const sp = (k: string) => (Array.isArray(searchParams[k]) ? searchParams[k]![0] : searchParams[k] ?? undefined)
   const filtroParams = { filtro: sp('filtro'), m: sp('m'), y: sp('y'), desde: sp('desde'), hasta: sp('hasta') }
-  const periodoLabel = filtroLabel(filtroParams)
   const tab = sp('tab') ?? 'resumen'
 
   type Row = Record<string, string>
@@ -46,6 +45,7 @@ export default async function ClientesPage({
   }
 
   const ventas = filtrarVentas(rawVentas, filtroParams)
+  const periodoLabel = filtroLabel(filtroParams, ventas[0]?.['FECHA'])
 
   // ── Fecha de referencia para actividad ────────────────────────────────
   const hoy        = new Date()

@@ -21,7 +21,6 @@ export default async function RecaudosPage({
 
   const sp = (k: string) => (Array.isArray(searchParams[k]) ? searchParams[k]![0] : searchParams[k] ?? undefined)
   const filtroParams = { filtro: sp('filtro'), m: sp('m'), y: sp('y'), desde: sp('desde'), hasta: sp('hasta') }
-  const periodoLabel = filtroLabel(filtroParams)
 
   type Row = Record<string, string>
   let recibosRaw: Row[] = []
@@ -36,6 +35,7 @@ export default async function RecaudosPage({
   }))
 
   const recibosFiltrados = filtrarVentas(recibosConVendedor, filtroParams)
+  const periodoLabel = filtroLabel(filtroParams, recibosFiltrados[0]?.['FECHA'])
 
   const vendedores = Array.from(new Set(
     recibosConVendedor.map(r => r['Vendedor']).filter(Boolean)

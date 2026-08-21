@@ -13,7 +13,8 @@ const MESES_FULL = [
 ]
 
 const OPCIONES: { id: FiltroTipo; label: string; sub: string }[] = [
-  { id: 'actual', label: 'Período actual',     sub: 'Mes más reciente del historial' },
+  { id: 'actual',    label: 'Período actual',  sub: 'Mes más reciente del historial' },
+  { id: 'ultimodia', label: 'Último día',      sub: 'Último día con movimiento registrado' },
   { id: 'mes',    label: 'Por mes',             sub: 'Elige mes y año específico' },
   { id: 'año',    label: 'Por año',             sub: 'Ver todo el año completo' },
   { id: 'rango',  label: 'Por día / rango',     sub: 'Fechas específicas (desde–hasta)' },
@@ -93,7 +94,12 @@ export default function PeriodoPicker() {
   }
 
   const isFiltered   = urlFiltro !== 'actual'
-  const currentLabel = filtroLabel({ filtro: urlFiltro, m: urlM, y: urlY, desde: urlDesde, hasta: urlHasta })
+  // fechaInfoISO es el último día con datos de ventas: sirve para que el
+  // tooltip de "Último día" muestre la fecha concreta.
+  const currentLabel = filtroLabel(
+    { filtro: urlFiltro, m: urlM, y: urlY, desde: urlDesde, hasta: urlHasta },
+    fechaInfoISO ?? undefined
+  )
 
   // Deshabilitar botón Aplicar si falta info requerida
   const canApply =
