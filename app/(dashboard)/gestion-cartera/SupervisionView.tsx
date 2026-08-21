@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import { BUCKET_ORDER, BUCKETS_CANONICOS } from '@/lib/cartera-normalize'
 
 interface Nota {
   ID: string; NIT: string; Fecha: string; Hora: string
@@ -11,8 +12,12 @@ interface Recordatorio {
   CreadoPor: string; Completado: string
 }
 interface Cliente {
-  nit: string; nombre: string; saldo: number; contactadoHoy: boolean
-  recordatoriosPendientes: number
+  nit: string; nombre: string; saldo: number; bucket: string
+  contactadoHoy: boolean; recordatoriosPendientes: number
+}
+interface Recaudo {
+  nit: string; cliente: string; recibo: string; factura: string
+  fecha: string; monto: number
 }
 
 type Periodo = 'hoy' | '3dias' | 'semana' | 'mes'
@@ -31,7 +36,17 @@ const TIPO_LABEL: Record<string, string> = {
   llamada: 'Llamada', mensaje: 'Mensaje', visita: 'Visita', nota: 'Nota', abono: 'Abono',
 }
 
+const BUCKET_COLOR: Record<string, string> = {
+  'Jurídico': '#991b1b', 'Prejurídico': '#ef4444', 'Mora': '#f97316', 'Vencida': '#fb923c',
+  'Próximo a vencer': '#eab308', '1-30 días': '#4ade80', 'No vencida': '#22c55e',
+}
+
 function fmt(n: number) { return '$' + Math.round(n).toLocaleString('es-CO') }
+function fmtK(n: number) {
+  if (n >= 1_000_000) return '$' + (n / 1_000_000).toFixed(1) + ' M'
+  if (n >= 1_000)     return '$' + Math.round(n / 1_000) + ' K'
+  return '$' + Math.round(n).toLocaleString('es-CO')
+}
 
 function toISO(d: Date) { return d.toISOString().slice(0, 10) }
 
@@ -46,11 +61,23 @@ function fmtFecha(iso: string) {
   return `${d}/${m}/${y}`
 }
 
+/** Lista de fechas ISO desde `desde` hasta `hasta`, ambas inclusive. */
+function rangoDias(desde: string, hasta: string): string[] {
+  const out: string[] = []
+  const d = new Date(desde + 'T12:00:00Z')
+  while (toISO(d) <= hasta) {
+    out.push(toISO(d))
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  return out
+}
+
 interface Props { clientes: Cliente[] }
 
 export default function SupervisionView({ clientes }: Props) {
   const [notas, setNotas] = useState<Nota[]>([])
   const [recordatorios, setRecordatorios] = useState<Recordatorio[]>([])
+  const [recaudos, setRecaudos] = useState<Recaudo[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [periodo, setPeriodo] = useState<Periodo>('hoy')
@@ -61,11 +88,13 @@ export default function SupervisionView({ clientes }: Props) {
     Promise.all([
       fetch('/api/gestion-cartera/notas').then((r) => r.json()).catch(() => ({ notas: [] })),
       fetch('/api/gestion-cartera/recordatorios').then((r) => r.json()).catch(() => ({ recordatorios: [] })),
-    ]).then(([n, r]) => {
+      fetch('/api/gestion-cartera/recaudos').then((r) => r.json()).catch(() => ({ recaudos: [] })),
+    ]).then(([n, r, p]) => {
       setNotas(n.notas ?? [])
       setRecordatorios(r.recordatorios ?? [])
+      setRecaudos(p.recaudos ?? [])
       if (!n.notas && !r.recordatorios) {
-        setLoadError('No se pudieron cargar los datos. Verifica que GOOGLE_SHEETS_ID_CARTERA esté configurado en Vercel.')
+        setLoadError(n.error ?? r.error ?? 'No se pudieron cargar los datos de gestión.')
       }
     }).finally(() => setLoading(false))
   }, [])
@@ -91,13 +120,65 @@ export default function SupervisionView({ clientes }: Props) {
   const todosContactados = periodo === 'hoy'
     ? clientes.filter((c) => nitsContactados.has(c.nit) || nitsContactadosMarcados.has(c.nit))
     : clientesContactados
+  const nitsTodosContactados = useMemo(
+    () => new Set(todosContactados.map((c) => c.nit)),
+    [todosContactados]
+  )
 
   const abonosPeriodo = notasPeriodo.filter((n) => n.Tipo === 'abono')
   const totalAbonosPeriodo = abonosPeriodo.reduce((s, n) => s + (Number(n.Monto) || 0), 0)
 
+  // Recaudo real (RAW_Recibos) en el período
+  const recaudosPeriodo = useMemo(
+    () => recaudos.filter((r) => r.fecha >= desde && r.fecha <= today),
+    [recaudos, desde, today]
+  )
+  const totalRecaudoPeriodo = recaudosPeriodo.reduce((s, r) => s + r.monto, 0)
+  const recibosUnicos = new Set(recaudosPeriodo.map((r) => r.recibo)).size
+
   const recVencidos = recordatorios.filter((r) => r.Completado !== 'SI' && r.FechaRecordar <= today)
 
   const nitNombre = Object.fromEntries(clientes.map((c) => [c.nit, c.nombre]))
+
+  // Clientes sin ningún contacto en el período, los más graves primero
+  const sinGestionar = useMemo(() =>
+    clientes
+      .filter((c) => !nitsTodosContactados.has(c.nit))
+      .sort((a, b) => {
+        const ba = BUCKET_ORDER[a.bucket] ?? -1
+        const bb = BUCKET_ORDER[b.bucket] ?? -1
+        if (bb !== ba) return bb - ba
+        return b.saldo - a.saldo
+      }),
+    [clientes, nitsTodosContactados]
+  )
+  const saldoSinGestionar = sinGestionar.reduce((s, c) => s + c.saldo, 0)
+
+  // Cobertura por bucket: contactados / total (del más grave al más sano)
+  const cobertura = useMemo(() =>
+    [...BUCKETS_CANONICOS]
+      .sort((a, b) => (BUCKET_ORDER[b] ?? 0) - (BUCKET_ORDER[a] ?? 0))
+      .map((bucket) => {
+        const del = clientes.filter((c) => c.bucket === bucket)
+        const contactados = del.filter((c) => nitsTodosContactados.has(c.nit))
+        return { bucket, total: del.length, contactados: contactados.length }
+      })
+      .filter((b) => b.total > 0),
+    [clientes, nitsTodosContactados]
+  )
+
+  // Actividad y recaudo por día del período (para las mini gráficas)
+  const dias = useMemo(() => rangoDias(desde, today), [desde, today])
+  const porDia = useMemo(() => {
+    const gestiones: Record<string, number> = {}
+    const plata: Record<string, number> = {}
+    for (const d of dias) { gestiones[d] = 0; plata[d] = 0 }
+    for (const n of notasPeriodo) if (gestiones[n.Fecha] !== undefined) gestiones[n.Fecha]++
+    for (const r of recaudosPeriodo) if (plata[r.fecha] !== undefined) plata[r.fecha] += r.monto
+    const maxGestiones = Math.max(1, ...Object.values(gestiones))
+    const maxPlata = Math.max(1, ...Object.values(plata))
+    return { gestiones, plata, maxGestiones, maxPlata }
+  }, [dias, notasPeriodo, recaudosPeriodo])
 
   // Group activity by date for multi-day views
   const actividadPorFecha = useMemo(() => {
@@ -127,6 +208,8 @@ export default function SupervisionView({ clientes }: Props) {
     )
   }
 
+  const MOSTRAR_SIN_GESTIONAR = 15
+
   return (
     <div className="space-y-4">
       {/* Filtro de período */}
@@ -154,45 +237,138 @@ export default function SupervisionView({ clientes }: Props) {
       </div>
 
       {/* Métricas */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
           {
             label: periodo === 'hoy' ? 'Contactados hoy' : `Contactados (${periodoLabel.toLowerCase()})`,
-            value: todosContactados.length,
-            total: clientes.length,
+            value: String(todosContactados.length),
+            sub: `de ${clientes.length} clientes`,
             color: '#22c55e',
           },
           {
             label: periodo === 'hoy' ? 'Notas hoy' : `Notas (${periodoLabel.toLowerCase()})`,
-            value: notasPeriodo.length,
-            total: undefined,
+            value: String(notasPeriodo.length),
+            sub: undefined,
             color: '#3b82f6',
           },
           {
-            label: 'Abonos gestionados',
-            value: abonosPeriodo.length,
+            label: 'Abonos anotados',
+            value: String(abonosPeriodo.length),
             sub: totalAbonosPeriodo > 0 ? fmt(totalAbonosPeriodo) : undefined,
-            total: undefined,
             color: '#14b8a6',
           },
           {
+            label: 'Recaudo real',
+            value: fmtK(totalRecaudoPeriodo),
+            sub: recibosUnicos > 0 ? `${recibosUnicos} ${recibosUnicos === 1 ? 'recibo' : 'recibos'}` : 'sin pagos en el período',
+            color: '#16a34a',
+          },
+          {
             label: 'Recordatorios vencidos',
-            value: recVencidos.length,
-            total: undefined,
+            value: String(recVencidos.length),
+            sub: undefined,
             color: '#ef4444',
           },
         ].map((m) => (
           <div key={m.label} className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card p-4">
             <div className="text-[11px] font-medium text-[var(--text-muted)] mb-1 leading-tight">{m.label}</div>
-            <div className="text-[28px] font-bold tracking-tight" style={{ color: m.color }}>{m.value}</div>
-            {'sub' in m && m.sub && (
-              <div className="text-[12px] font-semibold text-green-600 mt-0.5">{m.sub}</div>
-            )}
-            {m.total !== undefined && (
-              <div className="text-[10px] text-[var(--text-muted)] mt-0.5">de {m.total} total</div>
+            <div className="text-[24px] font-bold tracking-tight num leading-tight" style={{ color: m.color }}>{m.value}</div>
+            {m.sub && (
+              <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{m.sub}</div>
             )}
           </div>
         ))}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Sin gestionar — lo que nadie ha tocado en el período */}
+        <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card p-4">
+          <div className="flex items-baseline justify-between mb-1">
+            <div className="text-[13px] font-semibold text-[var(--text)]">
+              Sin gestionar — {periodoLabel.toLowerCase()}
+            </div>
+            <span className="text-[11px] font-semibold text-red-500 num">{fmtK(saldoSinGestionar)}</span>
+          </div>
+          <div className="text-[11px] text-[var(--text-muted)] mb-3">
+            {sinGestionar.length} {sinGestionar.length === 1 ? 'cliente' : 'clientes'} sin ningún contacto, los más graves primero
+          </div>
+          {sinGestionar.length === 0 ? (
+            <div className="py-6 text-center text-[12px] text-green-600">Todos los clientes fueron contactados 🎉</div>
+          ) : (
+            <>
+              <div className="space-y-1 max-h-[340px] overflow-y-auto">
+                {sinGestionar.slice(0, MOSTRAR_SIN_GESTIONAR).map((c) => (
+                  <div key={c.nit} className="flex items-center justify-between py-1.5 border-b border-[var(--border)] last:border-0">
+                    <div className="min-w-0 pr-2">
+                      <div className="text-[12px] text-[var(--text-sub)] truncate">{c.nombre}</div>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: BUCKET_COLOR[c.bucket] ?? '#94a3b8' }} />
+                        <span className="text-[10px]" style={{ color: BUCKET_COLOR[c.bucket] ?? 'var(--text-muted)' }}>{c.bucket || 'Sin bucket'}</span>
+                      </div>
+                    </div>
+                    <div className="text-[11px] num text-[var(--text)] font-medium flex-shrink-0">{fmt(c.saldo)}</div>
+                  </div>
+                ))}
+              </div>
+              {sinGestionar.length > MOSTRAR_SIN_GESTIONAR && (
+                <div className="mt-2 text-[10px] text-[var(--text-muted)] text-center">
+                  y {sinGestionar.length - MOSTRAR_SIN_GESTIONAR} más — usa el tablero para verlos todos
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Cobertura por bucket + ritmo del período */}
+        <div className="space-y-4">
+          <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card p-4">
+            <div className="text-[13px] font-semibold text-[var(--text)] mb-1">Cobertura por bucket</div>
+            <div className="text-[11px] text-[var(--text-muted)] mb-3">Clientes contactados sobre el total de cada categoría</div>
+            <div className="space-y-2">
+              {cobertura.map(({ bucket, total, contactados }) => {
+                const pct = total > 0 ? (contactados / total) * 100 : 0
+                return (
+                  <div key={bucket} className="flex items-center gap-2">
+                    <span className="text-[10px] w-[92px] flex-shrink-0 font-medium truncate" style={{ color: BUCKET_COLOR[bucket] }}>{bucket}</span>
+                    <div className="flex-1 h-2 rounded-full bg-[var(--bar-bg)] overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: BUCKET_COLOR[bucket] }} />
+                    </div>
+                    <span className="text-[10px] text-[var(--text-sub)] num w-14 text-right flex-shrink-0">{contactados} / {total}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {periodo !== 'hoy' && (
+            <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card p-4">
+              <div className="text-[13px] font-semibold text-[var(--text)] mb-3">Ritmo del período</div>
+
+              <div className="text-[10px] font-medium text-[var(--text-muted)] mb-1">Gestiones por día</div>
+              <div className="flex items-end gap-[3px] h-14 mb-1">
+                {dias.map((d) => (
+                  <div key={d} className="flex-1 rounded-t-[3px] bg-[var(--brand-blue)] min-h-[2px] transition-all"
+                    style={{ height: `${(porDia.gestiones[d] / porDia.maxGestiones) * 100}%`, opacity: porDia.gestiones[d] === 0 ? 0.15 : 1 }}
+                    title={`${fmtFecha(d)}: ${porDia.gestiones[d]} gestiones`} />
+                ))}
+              </div>
+
+              <div className="text-[10px] font-medium text-[var(--text-muted)] mb-1 mt-3">Recaudo por día</div>
+              <div className="flex items-end gap-[3px] h-14 mb-1">
+                {dias.map((d) => (
+                  <div key={d} className="flex-1 rounded-t-[3px] bg-green-500 min-h-[2px] transition-all"
+                    style={{ height: `${(porDia.plata[d] / porDia.maxPlata) * 100}%`, opacity: porDia.plata[d] === 0 ? 0.15 : 1 }}
+                    title={`${fmtFecha(d)}: ${fmt(porDia.plata[d])}`} />
+                ))}
+              </div>
+
+              <div className="flex justify-between text-[9px] text-[var(--text-muted)] num">
+                <span>{fmtFecha(desde)}</span>
+                <span>{fmtFecha(today)}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -246,7 +422,7 @@ export default function SupervisionView({ clientes }: Props) {
           )}
         </div>
 
-        {/* Clientes contactados en el período */}
+        {/* Contactados + pagos del período */}
         <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-card p-4">
           <div className="text-[13px] font-semibold text-[var(--text)] mb-3">
             {periodo === 'hoy' ? 'Contactados hoy' : `Contactados — ${periodoLabel}`}
@@ -261,7 +437,7 @@ export default function SupervisionView({ clientes }: Props) {
               {periodo === 'hoy' ? 'Ninguno aún' : 'Sin contactos en este período'}
             </div>
           ) : (
-            <div className="space-y-1 max-h-[280px] overflow-y-auto">
+            <div className="space-y-1 max-h-[220px] overflow-y-auto">
               {todosContactados.map((c) => (
                 <div key={c.nit} className="flex items-center justify-between py-1.5 border-b border-[var(--border)] last:border-0">
                   <div>
@@ -271,6 +447,26 @@ export default function SupervisionView({ clientes }: Props) {
                   <div className="text-[11px] num text-[var(--text)] font-medium">{fmt(c.saldo)}</div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Pagos reales del período */}
+          {recaudosPeriodo.length > 0 && (
+            <div className="mt-4 pt-3 border-t border-[var(--border)]">
+              <div className="text-[12px] font-semibold text-green-600 mb-2">
+                Pagos recibidos — {periodoLabel.toLowerCase()} ({recibosUnicos})
+              </div>
+              <div className="space-y-1 max-h-[160px] overflow-y-auto">
+                {recaudosPeriodo.slice(0, 30).map((r, i) => (
+                  <div key={`${r.recibo}-${r.factura}-${i}`} className="flex items-center justify-between py-1">
+                    <div className="min-w-0 pr-2">
+                      <div className="text-[11px] text-[var(--text-sub)] truncate">{nitNombre[r.nit] ?? (r.cliente || r.nit)}</div>
+                      <div className="text-[10px] text-[var(--text-muted)] num">{fmtFecha(r.fecha)} · {r.recibo}</div>
+                    </div>
+                    <span className="text-[11px] font-semibold text-green-600 num flex-shrink-0">{fmt(r.monto)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
