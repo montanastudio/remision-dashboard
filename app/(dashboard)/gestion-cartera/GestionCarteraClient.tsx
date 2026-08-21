@@ -6,6 +6,7 @@ import KanbanBoard, { type Cliente, type Lista } from './KanbanBoard'
 import NotasPanel from './NotasPanel'
 import InfoClientePanel from './InfoClientePanel'
 import SupervisionView from './SupervisionView'
+import RecordatoriosBell from './RecordatoriosBell'
 import KanbanFilters, { type Filters, FILTERS_EMPTY, applyFilters } from './KanbanFilters'
 
 interface Props {
@@ -38,6 +39,11 @@ export default function GestionCarteraClient({
 
   const filteredClientes = useMemo(() => applyFilters(clientes, filters), [clientes, filters])
   const selectedCliente  = clientes.find((c) => c.nit === selectedNIT) ?? null
+
+  const nombrePorNit = useMemo(
+    () => Object.fromEntries(clientes.map((c) => [c.nit, c.nombre])),
+    [clientes]
+  )
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -99,6 +105,11 @@ export default function GestionCarteraClient({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <RecordatoriosBell
+            nombrePorNit={nombrePorNit}
+            onVerCliente={(nit) => { setInfoNIT(null); setSelectedNIT(nit) }}
+            onCambio={refresh}
+          />
           <button onClick={refresh} disabled={refreshing}
             className="p-1.5 rounded-[6px] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bar-bg)] transition-colors disabled:opacity-40"
             title="Actualizar datos">
