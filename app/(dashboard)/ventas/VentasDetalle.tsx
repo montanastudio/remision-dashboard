@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, type ReactNode } from 'react'
 import { fmt, fmtN } from '@/lib/format'
 
 /** Fila mínima que necesita el detalle — se arma en el server. */
@@ -32,6 +32,58 @@ function normalizar(s: string): string {
 
 const MAX_FILAS = 300
 
+/** Agrupa la fila del grupo con su fila expandida sin romper el <tbody>. */
+function FragmentoGrupo({ children }: { children: ReactNode }) {
+  return <>{children}</>
+}
+
+function Caret({ abierto }: { abierto: boolean }) {
+  return (
+    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+      strokeLinecap="round" strokeLinejoin="round"
+      className={`flex-shrink-0 text-[var(--text-muted)] transition-transform ${abierto ? 'rotate-90' : ''}`}>
+      <path d="M9 18l6-6-6-6" />
+    </svg>
+  )
+}
+
+interface SubFila { key: string; celdas: ReactNode[] }
+
+/** Tabla anidada que muestra las líneas que componen un grupo. */
+function SubTabla({ encabezados, filas }: { encabezados: string[]; filas: SubFila[] }) {
+  const alinearDerecha = (i: number) => i >= encabezados.length - 2
+  return (
+    <div className="rounded-[6px] border border-[var(--border)] bg-[var(--card)] overflow-hidden">
+      <table className="w-full border-collapse text-[11px]">
+        <thead>
+          <tr>
+            {encabezados.map((h, i) => (
+              <th key={h}
+                className={`px-2.5 py-1.5 text-[9px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)] ${
+                  alinearDerecha(i) ? 'text-right' : 'text-left'
+                }`}>
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f) => (
+            <tr key={f.key} className="border-b border-[var(--border)] last:border-0">
+              {f.celdas.map((c, i) => (
+                <td key={i}
+                  className={`px-2.5 py-1.5 text-[var(--text-sub)] ${alinearDerecha(i) ? 'text-right' : ''}`}>
+                  {c}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 interface Props {
   filas: FilaVenta[]
   periodoLabel: string
@@ -40,7 +92,18 @@ interface Props {
 export default function VentasDetalle({ filas, periodoLabel }: Props) {
   const [q, setQ] = useState('')
   const [vendedoresSel, setVendedoresSel] = useState<string[]>([])
-  const [agrupacion, setAgrupacion] = useState<Agrupacion>('detalle')
+  const [agrupacion, setAgrupacionState] = useState<Agrupacion>('detalle')
+  const [expandidos, setExpandidos] = useState<string[]>([])
+
+  // Cambiar de agrupación invalida las claves expandidas
+  function setAgrupacion(a: Agrupacion) {
+    setAgrupacionState(a)
+    setExpandidos([])
+  }
+
+  function toggleExpandido(k: string) {
+    setExpandidos((prev) => prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k])
+  }
 
   // Vendedores presentes en el período, con su venta total para ordenarlos
   const vendedores = useMemo(() => {
@@ -84,15 +147,17 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
     const map: Record<string, {
       factura: string; fecha: string; cliente: string; nit: string
       vendedor: string; items: number; cantidad: number; valor: number
+      lineas: FilaVenta[]
     }> = {}
     for (const f of filtradas) {
       const k = f.factura || '(sin factura)'
       if (!map[k]) {
-        map[k] = { factura: k, fecha: f.fecha, cliente: f.cliente, nit: f.nit, vendedor: f.vendedor, items: 0, cantidad: 0, valor: 0 }
+        map[k] = { factura: k, fecha: f.fecha, cliente: f.cliente, nit: f.nit, vendedor: f.vendedor, items: 0, cantidad: 0, valor: 0, lineas: [] }
       }
       map[k].items    += 1
       map[k].cantidad += f.cantidad
       map[k].valor    += f.valor
+      map[k].lineas.push(f)
     }
     return Object.values(map).sort((a, b) => b.valor - a.valor)
   }, [filtradas, agrupacion])
@@ -102,17 +167,19 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
     const map: Record<string, {
       referencia: string; producto: string; grupo: string
       facturas: Set<string>; clientes: Set<string>; cantidad: number; valor: number
+      lineas: FilaVenta[]
     }> = {}
     for (const f of filtradas) {
       const k = f.referencia || f.producto || '(sin referencia)'
       if (!map[k]) {
-        map[k] = { referencia: k, producto: f.producto, grupo: f.grupo, facturas: new Set(), clientes: new Set(), cantidad: 0, valor: 0 }
+        map[k] = { referencia: k, producto: f.producto, grupo: f.grupo, facturas: new Set(), clientes: new Set(), cantidad: 0, valor: 0, lineas: [] }
       }
       if (!map[k].producto && f.producto) map[k].producto = f.producto
       if (f.factura) map[k].facturas.add(f.factura)
       if (f.nit) map[k].clientes.add(f.nit)
       map[k].cantidad += f.cantidad
       map[k].valor    += f.valor
+      map[k].lineas.push(f)
     }
     return Object.values(map).sort((a, b) => b.valor - a.valor)
   }, [filtradas, agrupacion])
@@ -216,6 +283,11 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
         <span className="text-[11px] text-[var(--text-sub)]">
           <span className="font-semibold text-[#22c55e] num">{fmt(totalValor)}</span>
         </span>
+        {agrupacion !== 'detalle' && (
+          <span className="text-[10px] text-[var(--text-muted)] ml-auto">
+            Clic en una fila para ver el detalle
+          </span>
+        )}
       </div>
 
       {/* Tabla */}
@@ -263,29 +335,90 @@ export default function VentasDetalle({ filas, periodoLabel }: Props) {
               </tr>
             </thead>
             <tbody>
-              {agrupacion === 'factura' && porFactura.slice(0, MAX_FILAS).map((f) => (
-                <tr key={f.factura} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
-                  <td className={`${tdBase} num text-[11px] text-[var(--text)]`}>{f.factura}</td>
-                  <td className={`${tdBase} num text-[11px]`}>{f.fecha}</td>
-                  <td className={tdBase}><span className="block max-w-[200px] truncate">{f.cliente}</span></td>
-                  <td className={tdBase}><span className="block max-w-[130px] truncate">{f.vendedor}</span></td>
-                  <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(f.items)}</td>
-                  <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(f.cantidad)}</td>
-                  <td className={`${tdBase} text-right num text-[11px]`}><span className="text-[#22c55e]">{fmt(f.valor)}</span></td>
-                </tr>
-              ))}
+              {agrupacion === 'factura' && porFactura.slice(0, MAX_FILAS).map((f) => {
+                const abierto = expandidos.includes(f.factura)
+                return (
+                  <FragmentoGrupo key={f.factura}>
+                    <tr onClick={() => toggleExpandido(f.factura)}
+                      className={`border-b border-[var(--border)] cursor-pointer transition-colors ${abierto ? 'bg-[var(--bar-bg)]' : 'hover:bg-[var(--nav-hover)]'}`}>
+                      <td className={`${tdBase} num text-[11px] text-[var(--text)]`}>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Caret abierto={abierto} />
+                          {f.factura}
+                        </span>
+                      </td>
+                      <td className={`${tdBase} num text-[11px]`}>{f.fecha}</td>
+                      <td className={tdBase}><span className="block max-w-[200px] truncate">{f.cliente}</span></td>
+                      <td className={tdBase}><span className="block max-w-[130px] truncate">{f.vendedor}</span></td>
+                      <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(f.items)}</td>
+                      <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(f.cantidad)}</td>
+                      <td className={`${tdBase} text-right num text-[11px]`}><span className="text-[#22c55e]">{fmt(f.valor)}</span></td>
+                    </tr>
+                    {abierto && (
+                      <tr className="border-b border-[var(--border)]">
+                        <td colSpan={7} className="px-[10px] py-2 bg-[var(--bar-bg)]">
+                          <SubTabla
+                            encabezados={['Referencia', 'Producto', 'Grupo', 'Cant.', 'Vr. Total']}
+                            filas={[...f.lineas].sort((a, b) => b.valor - a.valor).map((l, i) => ({
+                              key: `${l.referencia}-${i}`,
+                              celdas: [
+                                <span key="r" className="num text-[var(--text)]">{l.referencia}</span>,
+                                <span key="p" className="block max-w-[260px] truncate">{l.producto}</span>,
+                                <span key="g">{l.grupo}</span>,
+                                <span key="c" className="num">{fmtN(l.cantidad)}</span>,
+                                <span key="v" className="num text-[#22c55e]">{fmt(l.valor)}</span>,
+                              ],
+                            }))}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </FragmentoGrupo>
+                )
+              })}
 
-              {agrupacion === 'producto' && porProducto.slice(0, MAX_FILAS).map((p) => (
-                <tr key={p.referencia} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
-                  <td className={`${tdBase} num text-[11px] text-[var(--text)]`}>{p.referencia}</td>
-                  <td className={tdBase}><span className="block max-w-[220px] truncate">{p.producto}</span></td>
-                  <td className={tdBase}>{p.grupo}</td>
-                  <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(p.facturas.size)}</td>
-                  <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(p.clientes.size)}</td>
-                  <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(p.cantidad)}</td>
-                  <td className={`${tdBase} text-right num text-[11px]`}><span className="text-[#22c55e]">{fmt(p.valor)}</span></td>
-                </tr>
-              ))}
+              {agrupacion === 'producto' && porProducto.slice(0, MAX_FILAS).map((p) => {
+                const abierto = expandidos.includes(p.referencia)
+                return (
+                  <FragmentoGrupo key={p.referencia}>
+                    <tr onClick={() => toggleExpandido(p.referencia)}
+                      className={`border-b border-[var(--border)] cursor-pointer transition-colors ${abierto ? 'bg-[var(--bar-bg)]' : 'hover:bg-[var(--nav-hover)]'}`}>
+                      <td className={`${tdBase} num text-[11px] text-[var(--text)]`}>
+                        <span className="inline-flex items-center gap-1.5">
+                          <Caret abierto={abierto} />
+                          {p.referencia}
+                        </span>
+                      </td>
+                      <td className={tdBase}><span className="block max-w-[220px] truncate">{p.producto}</span></td>
+                      <td className={tdBase}>{p.grupo}</td>
+                      <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(p.facturas.size)}</td>
+                      <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(p.clientes.size)}</td>
+                      <td className={`${tdBase} text-right num text-[11px]`}>{fmtN(p.cantidad)}</td>
+                      <td className={`${tdBase} text-right num text-[11px]`}><span className="text-[#22c55e]">{fmt(p.valor)}</span></td>
+                    </tr>
+                    {abierto && (
+                      <tr className="border-b border-[var(--border)]">
+                        <td colSpan={7} className="px-[10px] py-2 bg-[var(--bar-bg)]">
+                          <SubTabla
+                            encabezados={['Factura', 'Fecha', 'Cliente', 'Vendedor', 'Cant.', 'Vr. Total']}
+                            filas={[...p.lineas].sort((a, b) => b.valor - a.valor).map((l, i) => ({
+                              key: `${l.factura}-${i}`,
+                              celdas: [
+                                <span key="f" className="num text-[var(--text)]">{l.factura}</span>,
+                                <span key="d" className="num">{l.fecha}</span>,
+                                <span key="c" className="block max-w-[200px] truncate">{l.cliente}</span>,
+                                <span key="v" className="block max-w-[140px] truncate">{l.vendedor}</span>,
+                                <span key="q" className="num">{fmtN(l.cantidad)}</span>,
+                                <span key="t" className="num text-[#22c55e]">{fmt(l.valor)}</span>,
+                              ],
+                            }))}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </FragmentoGrupo>
+                )
+              })}
 
               {agrupacion === 'detalle' && filtradas.slice(0, MAX_FILAS).map((f, i) => (
                 <tr key={`${f.factura}-${f.referencia}-${i}`} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
