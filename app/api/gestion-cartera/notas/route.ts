@@ -4,7 +4,7 @@ import { authOptions } from '@/lib/auth'
 import { getPermissions, canAccess } from '@/lib/permissions'
 import {
   getCarteraSheet, appendCarteraRow,
-  rowsToObjects, genId, todayISO, nowTime,
+  rowsToObjects, genId, todayISO, nowTime, carteraErrorMessage,
 } from '@/lib/sheets-cartera'
 
 async function authCheck() {
@@ -20,17 +20,21 @@ export async function GET(req: NextRequest) {
   const user = await authCheck()
   if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
-  const nit = req.nextUrl.searchParams.get('nit')
-  const rows = await getCarteraSheet('GC_Notas')
-  const notas = rowsToObjects(rows)
-  const filtered = nit ? notas.filter((n) => n['NIT'] === nit) : notas
-  // Newest first
-  filtered.sort((a, b) => {
-    const ka = `${a['Fecha']}${a['Hora']}`
-    const kb = `${b['Fecha']}${b['Hora']}`
-    return kb.localeCompare(ka)
-  })
-  return NextResponse.json({ notas: filtered })
+  try {
+    const nit = req.nextUrl.searchParams.get('nit')
+    const rows = await getCarteraSheet('GC_Notas')
+    const notas = rowsToObjects(rows)
+    const filtered = nit ? notas.filter((n) => n['NIT'] === nit) : notas
+    // Newest first
+    filtered.sort((a, b) => {
+      const ka = `${a['Fecha']}${a['Hora']}`
+      const kb = `${b['Fecha']}${b['Hora']}`
+      return kb.localeCompare(ka)
+    })
+    return NextResponse.json({ notas: filtered })
+  } catch (e) {
+    return NextResponse.json({ error: carteraErrorMessage(e) }, { status: 500 })
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -46,16 +50,20 @@ export async function POST(req: NextRequest) {
   const tipoFinal = tiposValidos.includes(tipo) ? tipo : 'nota'
   const montoFinal = tipoFinal === 'abono' && monto ? String(Number(monto)) : ''
 
-  await appendCarteraRow('GC_Notas', [
-    genId(),
-    nit,
-    todayISO(),
-    nowTime(),
-    user.name ?? '',
-    texto.trim(),
-    tipoFinal,
-    montoFinal,
-  ])
+  try {
+    await appendCarteraRow('GC_Notas', [
+      genId(),
+      nit,
+      todayISO(),
+      nowTime(),
+      user.name ?? '',
+      texto.trim(),
+      tipoFinal,
+      montoFinal,
+    ])
 
-  return NextResponse.json({ ok: true })
+    return NextResponse.json({ ok: true })
+  } catch (e) {
+    return NextResponse.json({ error: carteraErrorMessage(e) }, { status: 500 })
+  }
 }

@@ -4,24 +4,10 @@ import { authOptions } from '@/lib/auth'
 import { getPermissions, canAccess } from '@/lib/permissions'
 import { getSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
 import { getCarteraSheet, rowsToObjects as gcRows, todayISO } from '@/lib/sheets-cartera'
+import { normalizeCarteraRows, BUCKET_ORDER } from '@/lib/cartera-normalize'
 import GestionCarteraClient from './GestionCarteraClient'
 
 export const dynamic = 'force-dynamic'
-
-const BUCKET_ORDER: Record<string, number> = {
-  'Jurídico': 6, 'Prejurídico': 5, 'Mora': 4, 'Vencida': 3, 'Próximo a vencer': 2, '1-30 días': 1, 'No vencida': 0,
-  '+90 días': 6, '61-90 días': 4, '31-60 días': 3, '91+ días': 6, '61-75 días': 4, '76-90 días': 5, '46-60 días': 3, '31-45 días': 2,
-}
-
-const BUCKET_LEGACY: Record<string, string> = {
-  'No Vencida': 'No vencida', 'No vencida': 'No vencida',
-  '1-30 días': '1-30 días',
-  '31-45 días': 'Próximo a vencer', 'Próxima a Vencer': 'Próximo a vencer', 'Próximo a vencer': 'Próximo a vencer', '31-60 días': 'Próximo a vencer',
-  '46-60 días': 'Vencida', 'Vencida': 'Vencida',
-  '61-75 días': 'Mora', 'Mora': 'Mora', '61-90 días': 'Mora',
-  '76-90 días': 'Prejurídico', 'Prejudicial': 'Prejurídico', 'Prejurídico': 'Prejurídico',
-  '91+ días': 'Jurídico', '+90 días': 'Jurídico', 'Jurídica': 'Jurídico', 'Jurídico': 'Jurídico',
-}
 
 export default async function GestionCarteraPage() {
   const session = await getServerSession(authOptions)
@@ -34,7 +20,7 @@ export default async function GestionCarteraPage() {
 
   // ── Base: cartera actualizada diario ──────────────────────────────
   let carteraRows: Record<string, string>[] = []
-  try { carteraRows = rowsToObjects(await getSheetData('RAW_Cartera')) } catch { /* sheet vacío */ }
+  try { carteraRows = normalizeCarteraRows(rowsToObjects(await getSheetData('RAW_Cartera'))) } catch { /* sheet vacío */ }
 
   const clientMap: Record<string, {
     nit: string; nombre: string; saldo: number; bucket: string; diasVencido: number
@@ -45,8 +31,7 @@ export default async function GestionCarteraPage() {
     if (!nit) continue
     const saldo    = parseNum(row['Total Adeudado ($)'])
     const dias     = parseNum(row['Días Vencido'])
-    const rawBucket = row['Bucket'] ?? ''
-    const bucket   = BUCKET_LEGACY[rawBucket] ?? rawBucket
+    const bucket   = row['Bucket'] ?? ''
     const vendedor = (row['Vendedor'] ?? '').trim()
     if (!clientMap[nit]) {
       clientMap[nit] = { nit, nombre: row['Cliente'] ?? '', saldo: 0, bucket: '', diasVencido: 0, _vendedores: new Set() }

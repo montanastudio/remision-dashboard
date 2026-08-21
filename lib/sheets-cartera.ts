@@ -1,6 +1,30 @@
 import { google } from 'googleapis'
 
-const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID_CARTERA!
+function spreadsheetId(): string {
+  const id = process.env.GOOGLE_SHEETS_ID_CARTERA
+  if (!id) {
+    throw new Error(
+      'GOOGLE_SHEETS_ID_CARTERA no está configurada en el servidor. ' +
+      'En Vercel: Settings → Environment Variables → agrega GOOGLE_SHEETS_ID_CARTERA y vuelve a desplegar.'
+    )
+  }
+  return id
+}
+
+// Traduce errores de la API de Google a mensajes accionables para el usuario
+export function carteraErrorMessage(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (msg.includes('Unable to parse range')) {
+    return 'Falta una hoja GC_* en el spreadsheet de cartera. Entra como Administrador y usa "Ejecutar setup de hojas" en Gestión Cartera.'
+  }
+  if (msg.includes('PERMISSION_DENIED') || msg.includes('does not have permission') || msg.includes('caller does not have permission')) {
+    return 'La cuenta de servicio no tiene acceso al spreadsheet de cartera. Compártelo como Editor con el email de la cuenta de servicio.'
+  }
+  if (msg.includes('Requested entity was not found')) {
+    return 'No se encontró el spreadsheet de cartera. Verifica el valor de GOOGLE_SHEETS_ID_CARTERA.'
+  }
+  return msg
+}
 
 export type CarteraSheetName = 'GC_Listas' | 'GC_ClienteMeta' | 'GC_Notas' | 'GC_Recordatorios'
 
@@ -27,7 +51,7 @@ export async function getCarteraSheet(sheetName: CarteraSheetName): Promise<stri
   const auth = getAuth()
   const sheets = google.sheets({ version: 'v4', auth })
   const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetId(),
     range: sheetName,
   })
   return (response.data.values ?? []) as string[][]
@@ -37,7 +61,7 @@ export async function appendCarteraRow(sheetName: CarteraSheetName, values: stri
   const auth = getAuth(true)
   const sheets = google.sheets({ version: 'v4', auth })
   await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetId(),
     range: `${sheetName}!A1`,
     valueInputOption: 'RAW',
     requestBody: { values: [values] },
@@ -54,7 +78,7 @@ export async function updateCarteraRow(
   const sheets = google.sheets({ version: 'v4', auth })
   const endCol = String.fromCharCode(64 + Math.max(values.length, 1))
   await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetId(),
     range: `${sheetName}!A${rowIndex}:${endCol}${rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [values] },
@@ -66,12 +90,12 @@ export async function setCarteraSheet(sheetName: CarteraSheetName, values: strin
   const auth = getAuth(true)
   const sheets = google.sheets({ version: 'v4', auth })
   await sheets.spreadsheets.values.clear({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetId(),
     range: sheetName,
   })
   if (values.length > 0) {
     await sheets.spreadsheets.values.update({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: spreadsheetId(),
       range: `${sheetName}!A1`,
       valueInputOption: 'RAW',
       requestBody: { values },
@@ -85,14 +109,14 @@ export async function createSheetTabIfMissing(sheetName: CarteraSheetName): Prom
   const sheets = google.sheets({ version: 'v4', auth })
 
   const meta = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetId(),
     fields: 'sheets.properties.title',
   })
   const existing = (meta.data.sheets ?? []).map((s) => s.properties?.title)
   if (existing.includes(sheetName)) return false
 
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetId(),
     requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
   })
   return true

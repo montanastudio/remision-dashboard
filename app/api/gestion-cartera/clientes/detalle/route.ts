@@ -3,8 +3,13 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { getPermissions, canAccess } from '@/lib/permissions'
 import { getSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
+import { normalizeCarteraRows, BUCKETS_CANONICOS } from '@/lib/cartera-normalize'
 
 function n(v: string | undefined) { return parseNum(v ?? '') }
+
+function agingVacio(): Record<string, number> {
+  return Object.fromEntries(BUCKETS_CANONICOS.map((b) => [b, 0]))
+}
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -16,33 +21,26 @@ export async function GET(req: NextRequest) {
   const nit = req.nextUrl.searchParams.get('nit')
   if (!nit) return NextResponse.json({ error: 'NIT requerido' }, { status: 400 })
 
-  const rows = rowsToObjects(await getSheetData('RAW_Cartera'))
+  const rows = normalizeCarteraRows(rowsToObjects(await getSheetData('RAW_Cartera')))
   const rawFilas = rows.filter((r) => r['NIT']?.trim() === nit)
 
-  if (rawFilas.length === 0) return NextResponse.json({ nit, totalFacturas: 0, totalAdeudado: 0, aging: {}, lugares: [], facturas: [] })
+  if (rawFilas.length === 0) return NextResponse.json({ nit, totalFacturas: 0, totalAdeudado: 0, aging: agingVacio(), lugares: [], facturas: [] })
 
-  // Aggregate totals
+  // Aggregate totals. RAW_Cartera ya no trae columnas de aging por rango: cada
+  // factura cae en un solo bucket, así que el aging se acumula desde ahí.
   let totalAdeudado = 0
-  const aging = { noVencida: 0, dias1_30: 0, dias31_60: 0, dias61_90: 0, diasMas90: 0 }
+  const aging = agingVacio()
 
   // Group by Cliente name (sucursal/lugar)
   const lugarMap: Record<string, { totalAdeudado: number; facturas: number }> = {}
 
   const facturas = rawFilas.map((r) => {
-    const total = n(r['Total Adeudado ($)'])
-    const noV   = n(r['No Vencida ($)'])
-    const d1    = n(r['Vencida 1-30 ($)'])
-    const d31   = n(r['Vencida 31-60 ($)'])
-    const d61   = n(r['Vencida 61-90 ($)'])
-    const d90   = n(r['Vencida +90 ($)'])
-    const lugar = r['Cliente']?.trim() ?? ''
+    const total  = n(r['Total Adeudado ($)'])
+    const bucket = r['Bucket']?.trim() ?? ''
+    const lugar  = r['Cliente']?.trim() ?? ''
 
-    totalAdeudado    += total
-    aging.noVencida  += noV
-    aging.dias1_30   += d1
-    aging.dias31_60  += d31
-    aging.dias61_90  += d61
-    aging.diasMas90  += d90
+    totalAdeudado += total
+    if (bucket in aging) aging[bucket] += total
 
     if (!lugarMap[lugar]) lugarMap[lugar] = { totalAdeudado: 0, facturas: 0 }
     lugarMap[lugar].totalAdeudado += total
@@ -56,13 +54,8 @@ export async function GET(req: NextRequest) {
       fechaVencimiento: r['Fecha Vencimiento']?.trim() ?? '',
       valor:           n(r['Vr. Factura ($)']),
       total,
-      noVencida:       noV,
-      dias1_30:        d1,
-      dias31_60:       d31,
-      dias61_90:       d61,
-      diasMas90:       d90,
       diasVencido:     n(r['Días Vencido']),
-      bucket:          r['Bucket']?.trim() ?? '',
+      bucket,
       enMora:          r['En Mora']?.trim() === 'SI',
     }
   })

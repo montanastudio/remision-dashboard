@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { createPortal } from 'react-dom'
+import { BUCKETS_CANONICOS } from '@/lib/cartera-normalize'
 
-interface Aging {
-  noVencida: number; dias1_30: number; dias31_60: number; dias61_90: number; diasMas90: number
-}
+// Saldo por bucket canónico — las claves son los nombres de BUCKETS_CANONICOS
+type Aging = Record<string, number>
 interface Lugar {
   nombre: string; totalAdeudado: number; facturas: number
 }
@@ -13,7 +13,6 @@ interface Factura {
   numero: string; tipo: string; lugar: string
   fechaEmision: string; fechaVencimiento: string
   valor: number; total: number
-  noVencida: number; dias1_30: number; dias31_60: number; dias61_90: number; diasMas90: number
   diasVencido: number; bucket: string; enMora: boolean
 }
 interface DetalleData {
@@ -63,13 +62,9 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
 
   const ag = data?.aging
   const total = data?.totalAdeudado ?? 0
-  const agingItems = ag ? [
-    { label: 'Jurídico',         value: ag.diasMas90,  key: 'Jurídico' },
-    { label: 'Prejurídico',      value: ag.dias61_90,  key: 'Prejurídico' },
-    { label: 'Mora',             value: ag.dias31_60,  key: 'Mora' },
-    { label: 'Vencida',          value: ag.dias1_30,   key: 'Vencida' },
-    { label: 'No vencida',       value: ag.noVencida,  key: 'No vencida' },
-  ] : []
+  const agingItems = ag
+    ? BUCKETS_CANONICOS.map((b) => ({ label: b, value: ag[b] ?? 0, key: b }))
+    : []
 
   const multiLugar = (data?.lugares?.length ?? 0) > 1
 
@@ -281,26 +276,16 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
                       )}
                     </div>
 
-                    {/* Mini aging de esta factura */}
-                    {f.total > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          { label: 'Jurídico',  value: f.diasMas90,  key: 'Jurídico' },
-                          { label: 'Prejurídico', value: f.dias61_90, key: 'Prejurídico' },
-                          { label: 'Mora',      value: f.dias31_60,  key: 'Mora' },
-                          { label: 'Vencida',   value: f.dias1_30,   key: 'Vencida' },
-                          { label: 'No vec',    value: f.noVencida,  key: 'No vencida' },
-                        ].filter(a => a.value > 0).map(a => {
-                          const s = BUCKET_STYLE[a.key]
-                          return (
-                            <span key={a.key}
-                              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${s?.bg ?? ''} ${s?.text ?? ''}`}>
-                              {a.label} {fmt(a.value)}
-                            </span>
-                          )
-                        })}
-                      </div>
-                    )}
+                    {/* Bucket de esta factura */}
+                    {f.total > 0 && f.bucket && (() => {
+                      const s = BUCKET_STYLE[f.bucket]
+                      return (
+                        <span
+                          className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${s?.bg ?? ''} ${s?.text ?? ''}`}>
+                          {f.bucket} {fmt(f.total)}
+                        </span>
+                      )
+                    })()}
                   </div>
                 )
               })}

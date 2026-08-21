@@ -5,26 +5,9 @@ import { getPermissions, canAccess } from '@/lib/permissions'
 import { getSheetData, rowsToObjects, parseNum } from '@/lib/sheets'
 import {
   getCarteraSheet, upsertCarteraRow,
-  rowsToObjects as rowsToObjectsCartera, todayISO,
+  rowsToObjects as rowsToObjectsCartera, todayISO, carteraErrorMessage,
 } from '@/lib/sheets-cartera'
-
-// Normalizar nombres de bucket del sheet → nombres canónicos
-const BUCKET_LEGACY_API: Record<string, string> = {
-  'No Vencida': 'No vencida',       'No vencida': 'No vencida',
-  '1-30 días':  '1-30 días',        '1-30d': '1-30 días',
-  '31-45 días': 'Próximo a vencer', 'Próxima a Vencer': 'Próximo a vencer', 'Próximo a vencer': 'Próximo a vencer', '31-60 días': 'Próximo a vencer',
-  '46-60 días': 'Vencida',          'Vencida': 'Vencida',
-  '61-75 días': 'Mora',             'Mora': 'Mora', '61-90 días': 'Mora',
-  '76-90 días': 'Prejurídico',      'Prejudicial': 'Prejurídico', 'Prejurídico': 'Prejurídico',
-  '91+ días':   'Jurídico',         '+90 días': 'Jurídico', 'Jurídica': 'Jurídico', 'Jurídico': 'Jurídico',
-}
-function normalizeBucketAPI(raw: string): string {
-  return BUCKET_LEGACY_API[raw] ?? raw
-}
-
-const BUCKET_ORDER: Record<string, number> = {
-  'Jurídico': 6, 'Prejurídico': 5, 'Mora': 4, 'Vencida': 3, 'Próximo a vencer': 2, '1-30 días': 1, 'No vencida': 0,
-}
+import { normalizeCarteraRows, BUCKET_ORDER } from '@/lib/cartera-normalize'
 
 async function authCheck() {
   const session = await getServerSession(authOptions)
@@ -40,7 +23,7 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
 
   // 1. Base: cartera data (updated daily)
-  const carteraRows = rowsToObjects(await getSheetData('RAW_Cartera'))
+  const carteraRows = normalizeCarteraRows(rowsToObjects(await getSheetData('RAW_Cartera')))
 
   const clientMap: Record<string, {
     nit: string; nombre: string; saldo: number
@@ -53,7 +36,7 @@ export async function GET() {
     if (!nit) continue
     const saldo    = parseNum(row['Total Adeudado ($)'])
     const dias     = parseNum(row['Días Vencido'])
-    const bucket   = normalizeBucketAPI(row['Bucket'] ?? '')
+    const bucket   = row['Bucket'] ?? ''
     const vendedor = (row['Vendedor'] ?? '').trim()
     if (!clientMap[nit]) {
       clientMap[nit] = { nit, nombre: row['Cliente'] ?? '', saldo: 0, bucket: '', diasVencido: 0, _vendedores: new Set() }
@@ -76,12 +59,17 @@ export async function GET() {
   )).sort()
 
   // 2. Gestión meta
-  const metaRows = rowsToObjectsCartera(await getCarteraSheet('GC_ClienteMeta'))
+  let metaRows: Record<string, string>[] = []
+  let reminderRows: Record<string, string>[] = []
+  try {
+    metaRows = rowsToObjectsCartera(await getCarteraSheet('GC_ClienteMeta'))
+    // 3. Pending reminders count per client
+    reminderRows = rowsToObjectsCartera(await getCarteraSheet('GC_Recordatorios'))
+  } catch (e) {
+    return NextResponse.json({ error: carteraErrorMessage(e) }, { status: 500 })
+  }
   const metaMap: Record<string, Record<string, string>> = {}
   for (const r of metaRows) { if (r['NIT']) metaMap[r['NIT']] = r }
-
-  // 3. Pending reminders count per client
-  const reminderRows = rowsToObjectsCartera(await getCarteraSheet('GC_Recordatorios'))
   const today = todayISO()
   const reminderCount: Record<string, number> = {}
   for (const r of reminderRows) {
@@ -114,19 +102,23 @@ export async function PATCH(req: NextRequest) {
   const { nit, listaId, contactado } = await req.json()
   if (!nit) return NextResponse.json({ error: 'NIT requerido' }, { status: 400 })
 
-  // Read current meta to preserve fields not being updated
-  const metaRows = rowsToObjectsCartera(await getCarteraSheet('GC_ClienteMeta'))
-  const current = metaRows.find((r) => r['NIT'] === nit) ?? {}
+  try {
+    // Read current meta to preserve fields not being updated
+    const metaRows = rowsToObjectsCartera(await getCarteraSheet('GC_ClienteMeta'))
+    const current = metaRows.find((r) => r['NIT'] === nit) ?? {}
 
-  const today = todayISO()
-  const values = [
-    nit,
-    listaId !== undefined ? listaId : (current['ListaID'] ?? ''),
-    contactado ? today : (current['ContactadoFecha'] ?? ''),
-    user.name ?? '',
-    today,
-  ]
+    const today = todayISO()
+    const values = [
+      nit,
+      listaId !== undefined ? listaId : (current['ListaID'] ?? ''),
+      contactado ? today : (current['ContactadoFecha'] ?? ''),
+      user.name ?? '',
+      today,
+    ]
 
-  await upsertCarteraRow('GC_ClienteMeta', 'NIT', nit, values)
-  return NextResponse.json({ ok: true })
+    await upsertCarteraRow('GC_ClienteMeta', 'NIT', nit, values)
+    return NextResponse.json({ ok: true })
+  } catch (e) {
+    return NextResponse.json({ error: carteraErrorMessage(e) }, { status: 500 })
+  }
 }

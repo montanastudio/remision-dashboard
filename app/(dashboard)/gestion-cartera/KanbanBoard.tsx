@@ -107,7 +107,7 @@ export default function KanbanBoard({
         setNuevaListaColor('#3b82f6')
         setShowNuevaLista(false)
       } else {
-        setErrorLista(data.error ?? `Error ${res.status} — verifica que GOOGLE_SHEETS_ID_CARTERA esté configurado en Vercel`)
+        setErrorLista(data.error ?? `Error ${res.status} al crear la lista`)
       }
     } catch {
       setErrorLista('No se pudo conectar con el servidor')
