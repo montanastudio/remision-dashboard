@@ -39,11 +39,12 @@ interface Props {
   onInfoClient: (nit: string) => void
   onClienteUpdate: (nit: string, changes: Partial<Cliente>) => void
   onListaCreada: (lista: Lista) => void
+  onListaActualizada: (lista: Lista) => void
   onListaEliminada: (id: string) => void
 }
 
 export default function KanbanBoard({
-  clientes, listas, selectedNIT, infoNIT, onSelectClient, onInfoClient, onClienteUpdate, onListaCreada, onListaEliminada,
+  clientes, listas, selectedNIT, infoNIT, onSelectClient, onInfoClient, onClienteUpdate, onListaCreada, onListaActualizada, onListaEliminada,
 }: Props) {
   const [movingNIT, setMovingNIT] = useState<string | null>(null)
   const [showNuevaLista, setShowNuevaLista] = useState(false)
@@ -52,6 +53,12 @@ export default function KanbanBoard({
   const [savingLista, setSavingLista] = useState(false)
   const [errorLista, setErrorLista] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [menuListaId, setMenuListaId] = useState<string | null>(null)
+  const [editandoLista, setEditandoLista] = useState<Lista | null>(null)
+  const [editNombre, setEditNombre] = useState('')
+  const [editColor, setEditColor] = useState('#3b82f6')
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [errorEdit, setErrorEdit] = useState('')
 
   const COLORS = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#64748b']
 
@@ -116,8 +123,41 @@ export default function KanbanBoard({
     }
   }
 
+  function abrirEdicion(lista: Lista) {
+    setMenuListaId(null)
+    setEditandoLista(lista)
+    setEditNombre(lista.Nombre)
+    setEditColor(lista.Color || '#3b82f6')
+    setErrorEdit('')
+  }
+
+  async function guardarEdicion() {
+    if (!editandoLista || !editNombre.trim() || savingEdit) return
+    setSavingEdit(true)
+    setErrorEdit('')
+    try {
+      const res = await fetch('/api/gestion-cartera/listas', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editandoLista.ID, nombre: editNombre.trim(), color: editColor }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.lista) {
+        onListaActualizada(data.lista as Lista)
+        setEditandoLista(null)
+      } else {
+        setErrorEdit(data.error ?? `Error ${res.status} al guardar los cambios`)
+      }
+    } catch {
+      setErrorEdit('No se pudo conectar con el servidor')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
   async function eliminarLista(id: string) {
     setConfirmDeleteId(null)
+    setMenuListaId(null)
     await fetch('/api/gestion-cartera/listas', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -173,6 +213,48 @@ export default function KanbanBoard({
         </div>
       )}
 
+      {/* Modal editar lista */}
+      {editandoLista && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setEditandoLista(null)}>
+          <div className="rounded-card border bg-[var(--card)] border-[var(--border)] shadow-xl p-5 w-80" onClick={(e) => e.stopPropagation()}>
+            <div className="text-[13px] font-semibold text-[var(--text)] mb-4">Editar lista</div>
+            <input type="text" value={editNombre} onChange={(e) => setEditNombre(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') guardarEdicion() }}
+              placeholder="Nombre de la lista" autoFocus
+              className="w-full text-[12px] px-3 py-2 rounded-[6px] border bg-[var(--bar-bg)] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none mb-3"
+              style={{ borderColor: 'var(--border)' }} />
+            <div className="flex flex-wrap gap-2 mb-4">
+              {COLORS.map((c) => (
+                <button key={c} onClick={() => setEditColor(c)}
+                  className={`w-6 h-6 rounded-full transition-transform hover:scale-110 ${editColor === c ? 'ring-2 ring-offset-2 ring-[var(--text)]' : ''}`}
+                  style={{ background: c }} />
+              ))}
+            </div>
+            {errorEdit && (
+              <p className="text-[11px] text-red-500 mb-3 leading-tight">{errorEdit}</p>
+            )}
+            <div className="flex gap-2 justify-between items-center">
+              <button
+                onClick={() => { const id = editandoLista.ID; setEditandoLista(null); setConfirmDeleteId(id) }}
+                className="px-3 py-1.5 rounded-[6px] text-[11px] text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
+                Eliminar
+              </button>
+              <div className="flex gap-2">
+                <button onClick={() => setEditandoLista(null)}
+                  className="px-3 py-1.5 rounded-[6px] text-[11px] text-[var(--text-muted)] hover:text-[var(--text)] transition-colors">
+                  Cancelar
+                </button>
+                <button onClick={guardarEdicion} disabled={!editNombre.trim() || savingEdit}
+                  className="px-3 py-1.5 rounded-[6px] text-[11px] font-medium text-white disabled:opacity-40 transition-opacity"
+                  style={{ background: editColor }}>
+                  {savingEdit ? 'Guardando...' : 'Guardar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Confirm delete */}
       {confirmDeleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setConfirmDeleteId(null)}>
@@ -193,16 +275,44 @@ export default function KanbanBoard({
           <div key={col.id} className="flex-shrink-0 w-[270px] flex flex-col" style={{ maxHeight: 'calc(100vh - 260px)' }}>
             {/* Column header */}
             <div className="flex items-center justify-between mb-2 px-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: col.color }} />
-                <span className="text-[12px] font-semibold text-[var(--text)] truncate max-w-[160px]">{col.nombre}</span>
-                <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bar-bg)] px-1.5 rounded-full">{col.clientes.length}</span>
+                <span className="text-[12px] font-semibold text-[var(--text)] truncate max-w-[150px]">{col.nombre}</span>
+                <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bar-bg)] px-1.5 rounded-full flex-shrink-0">{col.clientes.length}</span>
               </div>
               {col.id && (
-                <button onClick={() => setConfirmDeleteId(col.id)}
-                  className="text-[var(--text-muted)] hover:text-red-400 text-[11px] px-1 transition-colors opacity-0 group-hover:opacity-100">
-                  ×
-                </button>
+                <div className="relative flex-shrink-0">
+                  <button
+                    onClick={() => setMenuListaId(menuListaId === col.id ? null : col.id)}
+                    className={`px-1.5 py-0.5 rounded-[5px] text-[13px] leading-none transition-colors ${
+                      menuListaId === col.id
+                        ? 'text-[var(--text)] bg-[var(--bar-bg)]'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bar-bg)]'
+                    }`}
+                    title="Editar o eliminar lista">
+                    ⋯
+                  </button>
+                  {menuListaId === col.id && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setMenuListaId(null)} />
+                      <div className="absolute right-0 top-full mt-1 z-30 rounded-[8px] border bg-[var(--card)] border-[var(--border)] shadow-xl py-1 w-40">
+                        <button
+                          onClick={() => {
+                            const l = listas.find((x) => x.ID === col.id)
+                            if (l) abrirEdicion(l)
+                          }}
+                          className="w-full text-left px-3 py-2 text-[11px] text-[var(--text-sub)] hover:bg-[var(--bar-bg)] hover:text-[var(--text)] transition-colors">
+                          Editar lista
+                        </button>
+                        <button
+                          onClick={() => { setMenuListaId(null); setConfirmDeleteId(col.id) }}
+                          className="w-full text-left px-3 py-2 text-[11px] text-red-500 hover:bg-[var(--bar-bg)] transition-colors">
+                          Eliminar lista
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               )}
             </div>
 

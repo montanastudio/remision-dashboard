@@ -12,12 +12,16 @@ interface Lugar {
 interface Factura {
   numero: string; tipo: string; lugar: string
   fechaEmision: string; fechaVencimiento: string
-  valor: number; total: number
+  valor: number; total: number; abonado: number
   diasVencido: number; bucket: string; enMora: boolean
+}
+interface Abono {
+  recibo: string; fecha: string; factura: string; monto: number
 }
 interface DetalleData {
   nit: string; totalFacturas: number; totalAdeudado: number
   aging: Aging; lugares: Lugar[]; facturas: Factura[]
+  abonos: Abono[]; totalAbonado: number; ultimoAbono: Abono | null
 }
 
 function fmt(n: number) {
@@ -49,7 +53,7 @@ interface Props { nit: string; nombre: string; onClose: () => void }
 export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
   const [data, setData] = useState<DetalleData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'resumen' | 'facturas'>('resumen')
+  const [tab, setTab] = useState<'resumen' | 'facturas' | 'abonos'>('resumen')
   const [lugarFiltro, setLugarFiltro] = useState<string>('__todos__')
 
   useEffect(() => {
@@ -99,6 +103,15 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
                 {multiLugar && (
                   <div className="text-[11px] text-[var(--text-muted)]">{data.lugares.length} sucursales</div>
                 )}
+                {data.totalAbonado > 0 && (
+                  <div className="mt-1.5">
+                    <div className="text-[10px] text-[var(--text-muted)]">Abonado histórico</div>
+                    <div className="text-[13px] font-bold text-green-600 dark:text-green-400 num leading-tight">{fmt(data.totalAbonado)}</div>
+                    {data.ultimoAbono && (
+                      <div className="text-[10px] text-[var(--text-muted)]">último: {data.ultimoAbono.fecha}</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -133,14 +146,18 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
           {/* Tabs */}
           {!loading && (
             <div className="flex gap-1 mt-3">
-              {(['resumen', 'facturas'] as const).map((t) => (
+              {(['resumen', 'facturas', 'abonos'] as const).map((t) => (
                 <button key={t} onClick={() => setTab(t)}
                   className={`px-3 py-1.5 rounded-[6px] text-[11px] font-medium transition-colors ${
                     tab === t
                       ? 'bg-[var(--brand-blue)] text-white'
                       : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--bar-bg)]'
                   }`}>
-                  {t === 'resumen' ? (multiLugar ? `Sucursales (${data?.lugares.length})` : 'Resumen') : `Facturas (${data?.totalFacturas})`}
+                  {t === 'resumen'
+                    ? (multiLugar ? `Sucursales (${data?.lugares.length})` : 'Resumen')
+                    : t === 'facturas'
+                      ? `Facturas (${data?.totalFacturas})`
+                      : `Abonos (${data?.abonos.length ?? 0})`}
                 </button>
               ))}
             </div>
@@ -151,8 +168,48 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
             <div className="py-10 text-center text-[12px] text-[var(--text-muted)]">Cargando...</div>
-          ) : !data || data.totalFacturas === 0 ? (
+          ) : !data || (data.totalFacturas === 0 && data.abonos.length === 0) ? (
             <div className="py-10 text-center text-[12px] text-[var(--text-muted)]">Sin datos para este NIT</div>
+          ) : tab === 'abonos' ? (
+            data.abonos.length === 0 ? (
+              <div className="py-10 text-center text-[12px] text-[var(--text-muted)]">
+                Este cliente no registra abonos
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-[8px] border p-3 bg-green-50/50 dark:bg-green-950/20" style={{ borderColor: 'var(--border)' }}>
+                  <div className="flex items-end justify-between">
+                    <div>
+                      <div className="text-[11px] text-[var(--text-muted)]">Total abonado</div>
+                      <div className="text-[20px] font-bold text-green-600 dark:text-green-400 num leading-tight">{fmt(data.totalAbonado)}</div>
+                      <div className="text-[10px] text-[var(--text-muted)] num">{fmtFull(data.totalAbonado)}</div>
+                    </div>
+                    <div className="text-right text-[11px] text-[var(--text-muted)]">
+                      {data.abonos.length} {data.abonos.length === 1 ? 'pago' : 'pagos'}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {data.abonos.map((a, i) => (
+                    <div key={`${a.recibo}-${a.factura}-${i}`}
+                      className="rounded-[8px] border p-3 flex items-start justify-between gap-2"
+                      style={{ borderColor: 'var(--border)' }}>
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-semibold text-[var(--text)] num">{a.recibo}</div>
+                        <div className="text-[10px] text-[var(--text-muted)] mt-0.5">
+                          {a.fecha}
+                          {a.factura && <> · factura <span className="num text-[var(--text-sub)]">{a.factura}</span></>}
+                        </div>
+                      </div>
+                      <div className="text-[13px] font-bold text-green-600 dark:text-green-400 num flex-shrink-0">
+                        {fmt(a.monto)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
           ) : tab === 'resumen' ? (
             <div className="space-y-3">
               {/* Aging detalle */}
@@ -264,6 +321,11 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
                         <div className="text-[13px] font-bold text-red-500 num">{fmt(f.total)}</div>
                         {f.total !== f.valor && (
                           <div className="text-[10px] text-[var(--text-muted)] num">Fact: {fmt(f.valor)}</div>
+                        )}
+                        {f.abonado > 0 && (
+                          <div className="text-[10px] font-semibold text-green-600 dark:text-green-400 num">
+                            Abonado: {fmt(f.abonado)}
+                          </div>
                         )}
                       </div>
                     </div>

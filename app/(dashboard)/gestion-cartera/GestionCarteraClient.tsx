@@ -68,6 +68,10 @@ export default function GestionCarteraClient({
     setListas((prev) => [...prev, lista])
   }
 
+  function handleListaActualizada(lista: Lista) {
+    setListas((prev) => prev.map((l) => l.ID === lista.ID ? { ...l, ...lista } : l))
+  }
+
   function handleListaEliminada(id: string) {
     setListas((prev) => prev.filter((l) => l.ID !== id))
     setClientes((prev) => prev.map((c) => c.listaId === id ? { ...c, listaId: '' } : c))
@@ -144,6 +148,7 @@ export default function GestionCarteraClient({
               onInfoClient={handleInfoClient}
               onClienteUpdate={handleClienteUpdate}
               onListaCreada={handleListaCreada}
+              onListaActualizada={handleListaActualizada}
               onListaEliminada={handleListaEliminada}
             />
           </div>
