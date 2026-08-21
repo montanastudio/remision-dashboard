@@ -4,8 +4,8 @@ import { fmt, fmtN } from '@/lib/format'
 import MetricCard from '@/components/MetricCard'
 import Card from '@/components/Card'
 import BarRows from '@/components/BarRows'
-import DataTable from '@/components/DataTable'
 import VentasCharts from './VentasCharts'
+import VentasDetalle, { type FilaVenta } from './VentasDetalle'
 
 export const dynamic = 'force-dynamic'
 
@@ -65,16 +65,18 @@ export default async function VentasPage({
     color:    'var(--brand-blue)',
   }))
 
-  // Tabla de detalle: construir filas con los campos clave
-  const tablaDetalle = ventas.map(r => ({
-    'Referencia': r['REFERENCIA'] ?? '',
-    'Producto':   r['PRODUCTO']   ?? '',
-    'Grupo':      r['NGRUPO']     ?? '',
-    'Cliente':    r['NCLIENTE']   ?? '',
-    'Vendedor':   r['NVENDEDOR']  ?? '',
-    'Fecha':      r['FECHA']      ?? '',
-    'Cantidad':   r['CANTIDAD']   ?? '',
-    'Vr. Total':  r['VRTOTAL']    ?? '',
+  // Detalle: filas mínimas que el componente cliente filtra y agrupa
+  const filasDetalle: FilaVenta[] = ventas.map(r => ({
+    factura:    r['FACTURA']    ?? '',
+    fecha:      r['FECHA']      ?? '',
+    nit:        r['IDCLIENTE']  ?? '',
+    cliente:    r['NCLIENTE']   ?? '',
+    vendedor:   r['NVENDEDOR']  ?? '',
+    referencia: r['REFERENCIA'] ?? '',
+    producto:   r['PRODUCTO']   ?? '',
+    grupo:      r['NGRUPO']     ?? '',
+    cantidad:   parseNum(r['CANTIDAD']),
+    valor:      parseNum(r['VRTOTAL']),
   }))
 
   return (
@@ -102,27 +104,7 @@ export default async function VentasPage({
       </div>
 
       <Card title="Detalle de Ventas" subtitle={periodoLabel}>
-        <DataTable
-          data={tablaDetalle}
-          columns={[
-            { key: 'Referencia',  header: 'Referencia', mono: true },
-            { key: 'Producto',    header: 'Producto', render: r => (
-              <span className="block max-w-[200px] truncate text-[var(--text)]">{String(r['Producto'] ?? '')}</span>
-            )},
-            { key: 'Grupo',   header: 'Grupo' },
-            { key: 'Cliente', header: 'Cliente', render: r => (
-              <span className="block max-w-[160px] truncate">{String(r['Cliente'] ?? '')}</span>
-            )},
-            { key: 'Vendedor', header: 'Vendedor', render: r => (
-              <span className="block max-w-[130px] truncate">{String(r['Vendedor'] ?? '')}</span>
-            )},
-            { key: 'Fecha',    header: 'Fecha',    mono: true },
-            { key: 'Cantidad', header: 'Cant.', align: 'right', mono: true,
-              render: r => fmtN(parseNum(String(r['Cantidad']))) },
-            { key: 'Vr. Total', header: 'Vr. Total', align: 'right', mono: true,
-              render: r => <span className="text-[#22c55e]">{fmt(parseNum(String(r['Vr. Total'])))}</span> },
-          ]}
-        />
+        <VentasDetalle filas={filasDetalle} periodoLabel={periodoLabel} />
       </Card>
     </div>
   )
