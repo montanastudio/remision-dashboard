@@ -53,6 +53,21 @@ const BUCKET_CANONICO: Record<string, BucketCanonico> = {
   '91+ días': 'Jurídico', '+90 días': 'Jurídico', 'Jurídica': 'Jurídico', 'Jurídico': 'Jurídico',
 }
 
+/**
+ * Buckets que ya pasaron el plazo de pago. Con el modelo por días desde
+ * factura, el plazo son 45 días: de ahí en adelante la factura está vencida.
+ *
+ * Se deriva del bucket y NO de la columna `Estado`, que es una clasificación
+ * manual del ERP: hay 33 facturas donde ambas se contradicen (unas dicen
+ * "SIN VENCER" estando en Jurídica y viceversa).
+ */
+export const BUCKETS_VENCIDOS: readonly string[] = ['Vencida', 'Mora', 'Prejurídico', 'Jurídico']
+
+/** ¿La factura ya pasó su plazo de pago? */
+export function esVencida(bucket: string | undefined): boolean {
+  return BUCKETS_VENCIDOS.includes((bucket ?? '').trim())
+}
+
 export function normalizeBucket(raw: string | undefined): string {
   const v = (raw ?? '').trim()
   return BUCKET_CANONICO[v] ?? v
@@ -74,7 +89,9 @@ export function normalizeCarteraRow(r: CarteraRow): CarteraRow {
     'Fecha Vencimiento':  r['Fecha Vence'] ?? r['Fecha Vencimiento'] ?? '',
     'Total Adeudado ($)': r['Saldo ($)'] ?? r['Total Adeudado ($)'] ?? '',
     'Vr. Factura ($)':    r['Total ($)'] ?? r['Vr. Factura ($)'] ?? '',
-    'En Mora':            (r['Estado'] ?? '').toUpperCase().includes('MORA') ? 'SI' : (r['En Mora'] ?? 'NO'),
+    // Derivado del bucket, no de la columna Estado del ERP. Se conserva para
+    // exportaciones y consumidores externos; la UI usa esVencida() directo.
+    'En Mora':            esVencida(normalizeBucket(r['Bucket'])) ? 'SI' : 'NO',
   }
 }
 

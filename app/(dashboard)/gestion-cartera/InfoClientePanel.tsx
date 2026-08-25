@@ -13,7 +13,7 @@ interface Factura {
   numero: string; tipo: string; lugar: string
   fechaEmision: string; fechaVencimiento: string
   valor: number; total: number; abonado: number
-  diasFactura: number; diasVencido: number; bucket: string; enMora: boolean
+  diasFactura: number; diasVencido: number; bucket: string
   alerta: string; estado: string
 }
 interface Abono {
@@ -310,9 +310,6 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-[12px] font-semibold text-[var(--text)] num">{f.numero}</span>
-                          {f.enMora && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-950/50 text-red-600">EN MORA</span>
-                          )}
                           {f.alerta && (
                             <span
                               title={`${f.alerta} — la clasificación de esta factura puede no ser confiable`}
@@ -351,16 +348,25 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
                       )}
                     </div>
 
-                    {/* Bucket de esta factura */}
-                    {f.total > 0 && f.bucket && (() => {
-                      const s = BUCKET_STYLE[f.bucket]
-                      return (
+                    {/* Bucket de esta factura + estado del ERP como referencia */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {f.total > 0 && f.bucket && (() => {
+                        const s = BUCKET_STYLE[f.bucket]
+                        return (
+                          <span
+                            className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${s?.bg ?? ''} ${s?.text ?? ''}`}>
+                            {f.bucket} {fmt(f.total)}
+                          </span>
+                        )
+                      })()}
+                      {f.estado && (
                         <span
-                          className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${s?.bg ?? ''} ${s?.text ?? ''}`}>
-                          {f.bucket} {fmt(f.total)}
+                          title="Clasificación comercial del ERP — no determina si la factura está vencida"
+                          className="text-[9px] px-1.5 py-0.5 rounded-full bg-[var(--bar-bg)] text-[var(--text-muted)] cursor-help">
+                          ERP: {f.estado.toLowerCase()}
                         </span>
-                      )
-                    })()}
+                      )}
+                    </div>
                   </div>
                 )
               })}

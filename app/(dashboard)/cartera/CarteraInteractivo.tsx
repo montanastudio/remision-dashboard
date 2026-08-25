@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { esVencida } from '@/lib/cartera-normalize'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import Card from '@/components/Card'
 import MiniDonut from './MiniDonut'
@@ -142,9 +143,11 @@ export default function CarteraInteractivo({ cartera, vendedores, recibos }: Pro
 
   // ── Métricas del encabezado (reaccionan al filtro de vendedor) ─────
   const { totalCartera, bucketBars, donutData, clientesEnMora, facturasEnMora } = useMemo(() => {
-    const enMora = (r: Record<string, string>) => r['En Mora']?.toLowerCase().startsWith('s')
-    const cEnMora = new Set(activeCartera.filter(enMora).map(r => r['NIT'])).size
-    const fEnMora = activeCartera.filter(enMora).length
+    // Vencida = el bucket ya pasó el plazo. Antes salía de la columna Estado
+    // del ERP, que dejaba fuera 169 facturas por $756M realmente vencidas.
+    const vencida = (r: Record<string, string>) => esVencida(r['Bucket'])
+    const cEnMora = new Set(activeCartera.filter(vencida).map(r => r['NIT'])).size
+    const fEnMora = activeCartera.filter(vencida).length
 
     const bucketAgg: Record<string, number> = {}
     activeCartera.forEach(r => {
@@ -349,7 +352,7 @@ export default function CarteraInteractivo({ cartera, vendedores, recibos }: Pro
     return activeCartera
       .filter((r) => {
         if (selectedClientNIT) return (r['NIT'] || '') === selectedClientNIT && (selectedBucket ? r['Bucket'] === selectedBucket : true)
-        return r['En Mora'] === 'SI' && (selectedBucket ? r['Bucket'] === selectedBucket : true)
+        return esVencida(r['Bucket']) && (selectedBucket ? r['Bucket'] === selectedBucket : true)
       })
       .sort((a, b) => parseN(b['Días Vencido']) - parseN(a['Días Vencido']))
   }, [activeCartera, selectedClientNIT, selectedBucket])
@@ -435,7 +438,7 @@ export default function CarteraInteractivo({ cartera, vendedores, recibos }: Pro
               {fmt(totalCartera)}
             </div>
             <div className="mt-1.5 flex items-center gap-3 text-[11px] text-[var(--text-muted)]">
-              <span><span className="font-semibold text-[var(--text-sub)]">{clientesEnMora.toLocaleString('es-CO')}</span> clientes en mora</span>
+              <span><span className="font-semibold text-[var(--text-sub)]">{clientesEnMora.toLocaleString('es-CO')}</span> clientes con saldo vencido</span>
               <span className="text-[var(--border)]">·</span>
               <span><span className="font-semibold text-[var(--text-sub)]">{facturasEnMora.toLocaleString('es-CO')}</span> facturas vencidas</span>
             </div>
