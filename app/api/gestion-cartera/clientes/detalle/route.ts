@@ -90,9 +90,12 @@ export async function GET(req: NextRequest) {
       valor:           n(r['Vr. Factura ($)']),
       total,
       abonado:         n(r['Abonado ($)']),
+      diasFactura:     n(r['Días Desde Factura']),
       diasVencido:     n(r['Días Vencido']),
       bucket,
       enMora:          r['En Mora']?.trim() === 'SI',
+      alerta:          (r['Alerta'] ?? '').trim(),
+      estado:          (r['Estado'] ?? '').trim(),
     }
   })
 

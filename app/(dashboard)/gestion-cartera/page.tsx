@@ -31,7 +31,7 @@ export default async function GestionCarteraPage() {
     const nit = row['NIT']?.trim()
     if (!nit) continue
     const saldo    = parseNum(row['Total Adeudado ($)'])
-    const dias     = parseNum(row['Días Vencido'])
+    const dias     = parseNum(row['Días Desde Factura'])
     const bucket   = row['Bucket'] ?? ''
     const vendedor = (row['Vendedor'] ?? '').trim()
     if (!clientMap[nit]) {

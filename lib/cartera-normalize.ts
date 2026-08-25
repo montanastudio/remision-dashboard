@@ -8,13 +8,17 @@
 export type CarteraRow = Record<string, string>
 
 // Del más severo al más sano — este orden manda en badges y agrupaciones.
+//
+// Desde 2026-08 el sheet clasifica por DÍAS DESDE LA FACTURA (no por días
+// vencidos): 1-30 sin vencer, 31-45 próximo a vencer, 46-60 vencida,
+// 61-75 mora, 76-90 prejurídico, 91+ jurídico. El bucket '1-30 días' del
+// modelo anterior (que significaba 1-30 días YA vencida) desapareció.
 export const BUCKETS_CANONICOS = [
   'Jurídico',
   'Prejurídico',
   'Mora',
   'Vencida',
   'Próximo a vencer',
-  '1-30 días',
   'No vencida',
 ] as const
 
@@ -26,7 +30,7 @@ export const BUCKET_ORDER: Record<string, number> = {
   'Mora': 4,
   'Vencida': 3,
   'Próximo a vencer': 2,
-  '1-30 días': 1,
+  '1-30 días': 1,   // solo para datos viejos; el sheet ya no lo emite
   'No vencida': 0,
 }
 
@@ -34,8 +38,9 @@ const BUCKET_CANONICO: Record<string, BucketCanonico> = {
   // Sin vencer
   'Sin Vencer': 'No vencida', 'SIN VENCER': 'No vencida', 'Sin vencer': 'No vencida',
   'No Vencida': 'No vencida', 'No vencida': 'No vencida',
-  // Vencimiento temprano
-  '1-30 días': '1-30 días',
+  // Vencimiento temprano. '1-30 días' del modelo viejo (1-30 días YA
+  // vencida) no se traduce: pasa tal cual y BUCKET_ORDER lo sigue ubicando,
+  // para no reinterpretar datos históricos.
   '31-45 días': 'Próximo a vencer', '31-60 días': 'Próximo a vencer',
   'Próxima a Vencer': 'Próximo a vencer', 'Próximo a vencer': 'Próximo a vencer',
   // Vencida
@@ -57,7 +62,14 @@ export function normalizeCarteraRow(r: CarteraRow): CarteraRow {
   return {
     ...r,
     Bucket:               normalizeBucket(r['Bucket']),
-    'Días Vencido':       r['Días'] ?? r['Días Vencido'] ?? '',
+    // El sheet partió 'Días' en dos columnas. La que manda el bucket es
+    // 'Días Desde Factura'; 'Días Vencido (Sistema)' cuenta desde el
+    // vencimiento y se conserva por si se necesita la mora real.
+    'Días Desde Factura': r['Días Desde Factura'] ?? r['Días'] ?? '',
+    'Días Vencido':       r['Días Vencido (Sistema)'] ?? r['Días Vencido'] ?? '',
+    // Marca del script cuando la factura tiene datos sospechosos
+    // (p. ej. fecha de vencimiento igual a la de emisión).
+    Alerta:               r['Alerta'] ?? '',
     'Fecha Emisión':      r['Fecha Factura'] ?? r['Fecha Emisión'] ?? '',
     'Fecha Vencimiento':  r['Fecha Vence'] ?? r['Fecha Vencimiento'] ?? '',
     'Total Adeudado ($)': r['Saldo ($)'] ?? r['Total Adeudado ($)'] ?? '',

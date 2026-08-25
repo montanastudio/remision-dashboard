@@ -13,7 +13,8 @@ interface Factura {
   numero: string; tipo: string; lugar: string
   fechaEmision: string; fechaVencimiento: string
   valor: number; total: number; abonado: number
-  diasVencido: number; bucket: string; enMora: boolean
+  diasFactura: number; diasVencido: number; bucket: string; enMora: boolean
+  alerta: string; estado: string
 }
 interface Abono {
   recibo: string; fecha: string; factura: string; monto: number
@@ -312,6 +313,13 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
                           {f.enMora && (
                             <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 dark:bg-red-950/50 text-red-600">EN MORA</span>
                           )}
+                          {f.alerta && (
+                            <span
+                              title={`${f.alerta} — la clasificación de esta factura puede no ser confiable`}
+                              className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-400 cursor-help">
+                              ⚠ SIN PLAZO
+                            </span>
+                          )}
                         </div>
                         {(multiLugar && lugarFiltro === '__todos__') && (
                           <div className="text-[10px] text-[var(--text-muted)] mt-0.5 leading-tight">{f.lugar}</div>
@@ -333,8 +341,13 @@ export default function InfoClientePanel({ nit, nombre, onClose }: Props) {
                     <div className="flex items-center gap-3 text-[10px] text-[var(--text-muted)] mb-2">
                       <span>Emisión: <span className="text-[var(--text-sub)]">{f.fechaEmision}</span></span>
                       <span>Vence: <span className="text-[var(--text-sub)]">{f.fechaVencimiento}</span></span>
+                      {f.diasFactura > 0 && (
+                        <span className="text-[var(--text-sub)]">
+                          <span className="font-semibold">{f.diasFactura}</span> días desde factura
+                        </span>
+                      )}
                       {f.diasVencido > 0 && (
-                        <span className="text-red-500 font-semibold">{f.diasVencido} días vencida</span>
+                        <span className="text-red-500 font-semibold">{f.diasVencido} vencida</span>
                       )}
                     </div>
 
