@@ -15,8 +15,7 @@ const CLIENT_COLORS = [
 ]
 
 const BUCKET_CONFIG = [
-  { name: 'No vencida',       label: 'No vencida', color: '#22c55e' },
-  { name: '1-30 días',        label: '1-30d',      color: '#86efac' },
+  { name: 'No vencida',       label: '1-30d',      color: '#22c55e' },
   { name: 'Próximo a vencer', label: '31-45d',     color: '#f59e0b' },
   { name: 'Vencida',          label: '46-60d',     color: '#f97316' },
   { name: 'Mora',             label: '61-75d',     color: '#ea580c' },
@@ -41,8 +40,7 @@ const BUCKET_COLOR: Record<string, string> = {
   '31-60 días':       '#f97316',
 }
 const BUCKET_ORDER_ARR = [
-  'Jurídico', '+90 días', 'Prejurídico', 'Mora', '61-90 días',
-  'Vencida', '31-60 días', 'Próximo a vencer', '1-30 días', 'No vencida',
+  'Jurídico', 'Prejurídico', 'Mora', 'Vencida', 'Próximo a vencer', 'No vencida',
 ]
 
 const BUCKET_BADGE: Record<string, { bg: string; text: string }> = {
@@ -79,7 +77,7 @@ interface Props {
 }
 
 const BUCKET_LABEL: Record<string, string> = {
-  'No vencida': 'No vencida', '1-30 días': '1-30d',
+  'No vencida': '1-30d',
   'Próximo a vencer': '31-45d', 'Vencida': '46-60d',
   'Mora': '61-75d', 'Prejurídico': '76-90d', 'Jurídico': '91+d',
   '+90 días': '91+d', '61-90 días': '61-90d', '31-60 días': '31-60d',

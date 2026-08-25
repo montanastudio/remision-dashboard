@@ -24,6 +24,24 @@ export const BUCKETS_CANONICOS = [
 
 export type BucketCanonico = (typeof BUCKETS_CANONICOS)[number]
 
+/**
+ * Rango de días DESDE LA FACTURA que corresponde a cada bucket. Es la misma
+ * regla que aplica el script de importación; vive aquí para que los filtros
+ * y las gráficas no la repitan cada uno por su lado.
+ */
+export const BUCKET_RANGO_DIAS: Record<BucketCanonico, string> = {
+  'No vencida':       '1-30d',
+  'Próximo a vencer': '31-45d',
+  'Vencida':          '46-60d',
+  'Mora':             '61-75d',
+  'Prejurídico':      '76-90d',
+  'Jurídico':         '91+d',
+}
+
+/** Buckets del más sano al más grave — orden natural para filtros y barras. */
+export const BUCKETS_ASCENDENTE: readonly BucketCanonico[] =
+  [...BUCKETS_CANONICOS].reverse()
+
 export const BUCKET_ORDER: Record<string, number> = {
   'Jurídico': 6,
   'Prejurídico': 5,

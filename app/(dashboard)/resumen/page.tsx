@@ -268,11 +268,11 @@ export default async function ResumenPage({
     'Mora': '#ea580c', 'Prejurídico': '#ef4444', 'Jurídico': '#b91c1c',
   }
   const CARTERA_LABELS: Record<string, string> = {
-    'No vencida': 'No vencida', '1-30 días': '1-30d',
+    'No vencida': '1-30d',
     'Próximo a vencer': '31-45d', 'Vencida': '46-60d',
     'Mora': '61-75d', 'Prejurídico': '76-90d', 'Jurídico': '91+d',
   }
-  const BUCKET_ORDER_RES = ['No vencida','1-30 días','Próximo a vencer','Vencida','Mora','Prejurídico','Jurídico']
+  const BUCKET_ORDER_RES = ['No vencida','Próximo a vencer','Vencida','Mora','Prejurídico','Jurídico']
 
   const bucketAggRes: Record<string, number> = {}
   carteraRes.forEach(r => {

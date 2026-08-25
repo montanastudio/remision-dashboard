@@ -1,5 +1,7 @@
 'use client'
 
+import { BUCKETS_ASCENDENTE, BUCKET_RANGO_DIAS } from '@/lib/cartera-normalize'
+
 export interface Filters {
   search:    string
   bucket:    string
@@ -12,15 +14,9 @@ export const FILTERS_EMPTY: Filters = {
   search: '', bucket: '', montoMin: '', montoMax: '', vendedor: '',
 }
 
-const BUCKETS = [
-  { value: 'No vencida',       label: 'No vencida' },
-  { value: '1-30 días',        label: '1-30d' },
-  { value: 'Próximo a vencer', label: '31-45d' },
-  { value: 'Vencida',          label: '46-60d' },
-  { value: 'Mora',             label: '61-75d' },
-  { value: 'Prejurídico',      label: '76-90d' },
-  { value: 'Jurídico',         label: '91+d' },
-]
+// Derivados de la definición canónica: así el filtro no ofrece rangos que el
+// sheet ya no produce (el viejo '1-30 días' quedaba como opción vacía).
+const BUCKETS = BUCKETS_ASCENDENTE.map(b => ({ value: b, label: BUCKET_RANGO_DIAS[b] }))
 
 function parseMonto(v: string): number {
   return parseFloat(v.replace(/\./g, '').replace(/,/g, '').replace(/[^0-9]/g, '')) || 0
