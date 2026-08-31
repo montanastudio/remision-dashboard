@@ -2,13 +2,30 @@
 
 import { useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { useSearchParams } from 'next/navigation'
-import type { ProductoKardex, MovimientoKardex } from '@/lib/kardex'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
+import { consolidarPorProducto, TIPOS_VENTA, type ProductoKardex, type MovimientoKardex } from '@/lib/kardex'
 import { fmt, fmtN } from '@/lib/format'
+import { hoyBogota, diaBogota } from '@/lib/hoy-bogota'
 
 interface Props {
   productos: ProductoKardex[]
   periodoLabel: string
+  diasVentana: number
+}
+
+type OrdenCol = 'valor' | 'ventas' | 'cobertura' | 'stock'
+
+const RANGOS = [
+  { id: '7d',  label: '7 días',  dias: 7 },
+  { id: '30d', label: '30 días', dias: 30 },
+  { id: '90d', label: '90 días', dias: 90 },
+] as const
+
+/** Cobertura en días: cuánto dura el stock al ritmo de venta de la ventana. */
+function cobertura(p: ProductoKardex, dias: number): number | null {
+  if (p.saldoActual <= 0) return null
+  if (p.ventasPeriodo <= 0) return Infinity
+  return p.saldoActual / (p.ventasPeriodo / dias)
 }
 
 const MAX_FILAS = 400
@@ -26,12 +43,18 @@ const TIPO_LABEL: Record<string, string> = {
   SO: 'Salida', EO: 'Entrada', SK: 'Salida', ST: 'Salida', SF: 'Salida', TD: 'Traslado',
 }
 
-export default function InventarioKardex({ productos, periodoLabel }: Props) {
+export default function InventarioKardex({ productos, periodoLabel, diasVentana }: Props) {
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
   const [q, setQ] = useState('')
   const [bodegaSel, setBodegaSel] = useState('')
   const [soloMov, setSoloMov] = useState(false)
-  const [popup, setPopup] = useState<{ p: ProductoKardex; dir: 'entradas' | 'salidas' } | null>(null)
+  const [consolidado, setConsolidado] = useState(true)
+  const [orden, setOrden] = useState<OrdenCol>('valor')
+  const [cDesde, setCDesde] = useState(searchParams.get('kdesde') ?? '')
+  const [cHasta, setCHasta] = useState(searchParams.get('khasta') ?? '')
+  const [popup, setPopup] = useState<{ p: ProductoKardex; dir: 'entradas' | 'salidas' | 'ventas' } | null>(null)
   const [movs, setMovs] = useState<MovimientoKardex[] | null>(null)
   const [cargando, setCargando] = useState(false)
   const [errorPopup, setErrorPopup] = useState('')
@@ -41,31 +64,69 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
     [productos]
   )
 
+  // Con bodega elegida siempre se ve por bodega; en "todas" manda el toggle
+  const base = useMemo(() => {
+    const porBodega = bodegaSel ? productos.filter((p) => p.bodega === bodegaSel) : productos
+    return !bodegaSel && consolidado ? consolidarPorProducto(porBodega) : porBodega
+  }, [productos, bodegaSel, consolidado])
+
   const indexados = useMemo(
-    () => productos.map((p) => ({ p, buscable: normalizar(`${p.referencia} ${p.producto} ${p.codigo}`) })),
-    [productos]
+    () => base.map((p) => ({ p, buscable: normalizar(`${p.referencia} ${p.producto} ${p.codigo}`) })),
+    [base]
   )
 
   const filtrados = useMemo(() => {
     const term = normalizar(q.trim())
-    return indexados
+    const lista = indexados
       .filter(({ p, buscable }) => {
         if (term && !buscable.includes(term)) return false
-        if (bodegaSel && p.bodega !== bodegaSel) return false
         if (soloMov && p.entradasPeriodo === 0 && p.salidasPeriodo === 0) return false
         return true
       })
       .map(({ p }) => p)
-  }, [indexados, q, bodegaSel, soloMov])
+    const cob = (p: ProductoKardex) => cobertura(p, diasVentana)
+    return lista.sort((a, b) => {
+      if (orden === 'ventas') return b.ventasPeriodo - a.ventasPeriodo
+      if (orden === 'stock') return b.saldoActual - a.saldoActual
+      if (orden === 'cobertura') {
+        // Primero lo que se agota: cobertura corta arriba; sin ventas al final
+        const ca = cob(a) ?? Infinity, cb = cob(b) ?? Infinity
+        return ca - cb
+      }
+      return b.valorActual - a.valorActual
+    })
+  }, [indexados, q, soloMov, orden, diasVentana])
 
   const tot = useMemo(() => ({
     stock:    filtrados.reduce((s, p) => s + p.saldoActual, 0),
     valor:    filtrados.reduce((s, p) => s + p.valorActual, 0),
     entradas: filtrados.reduce((s, p) => s + p.entradasPeriodo, 0),
     salidas:  filtrados.reduce((s, p) => s + p.salidasPeriodo, 0),
+    ventas:   filtrados.reduce((s, p) => s + p.ventasPeriodo, 0),
+    ventasPrev: filtrados.reduce((s, p) => s + p.ventasPrev, 0),
   }), [filtrados])
 
-  async function abrirDetalle(p: ProductoKardex, dir: 'entradas' | 'salidas') {
+  function aplicarRango(desde: string, hasta: string) {
+    const qs = new URLSearchParams(searchParams.toString())
+    qs.set('tab', 'kardex')
+    if (desde && hasta) { qs.set('kdesde', desde); qs.set('khasta', hasta) }
+    else { qs.delete('kdesde'); qs.delete('khasta') }
+    router.push(`${pathname}?${qs.toString()}`)
+  }
+
+  const rangoActivo = useMemo(() => {
+    const d = searchParams.get('kdesde'), h = searchParams.get('khasta')
+    if (!d || !h) return 'global'
+    for (const r of RANGOS) {
+      if (d === diaBogota(-(r.dias - 1)) && h === hoyBogota()) return r.id
+    }
+    if (d === `${hoyBogota().slice(0, 4)}-01-01` && h === hoyBogota()) return 'año'
+    return 'custom'
+  }, [searchParams])
+
+  const esConsolidado = !bodegaSel && consolidado
+
+  async function abrirDetalle(p: ProductoKardex, dir: 'entradas' | 'salidas' | 'ventas') {
     setPopup({ p, dir })
     setMovs(null)
     setErrorPopup('')
@@ -91,7 +152,9 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
 
   const movsFiltrados = useMemo(() => {
     if (!movs || !popup) return []
-    return movs.filter((m) => popup.dir === 'entradas' ? m.entradas > 0 : m.salidas > 0)
+    if (popup.dir === 'entradas') return movs.filter((m) => m.entradas > 0)
+    if (popup.dir === 'ventas') return movs.filter((m) => m.salidas > 0 && TIPOS_VENTA.includes(m.tipo))
+    return movs.filter((m) => m.salidas > 0)
   }, [movs, popup])
 
   const th = 'px-[10px] py-[8px] text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--text-muted)] border-b border-[var(--border)]'
@@ -99,6 +162,68 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
 
   return (
     <div>
+      {/* Ventana de tiempo */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+        <span className="text-[10px] uppercase tracking-wider text-[var(--text-muted)] mr-0.5">Ventana</span>
+        <div className="flex rounded-[6px] border border-[var(--border)] overflow-hidden">
+          {RANGOS.map((r) => (
+            <button key={r.id}
+              onClick={() => aplicarRango(diaBogota(-(r.dias - 1)), hoyBogota())}
+              className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                rangoActivo === r.id ? 'bg-[var(--brand-blue)] text-white' : 'text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
+              }`}>
+              {r.label}
+            </button>
+          ))}
+          <button
+            onClick={() => aplicarRango(`${hoyBogota().slice(0, 4)}-01-01`, hoyBogota())}
+            className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+              rangoActivo === 'año' ? 'bg-[var(--brand-blue)] text-white' : 'text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
+            }`}>
+            Este año
+          </button>
+          <button
+            onClick={() => aplicarRango('', '')}
+            title="Vuelve al período del filtro global de la barra superior"
+            className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+              rangoActivo === 'global' ? 'bg-[var(--brand-blue)] text-white' : 'text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
+            }`}>
+            Filtro global
+          </button>
+        </div>
+        <div className="flex items-center gap-1 ml-1">
+          <input type="date" value={cDesde} onChange={(e) => setCDesde(e.target.value)}
+            className="text-[11px] px-1.5 py-1 rounded-[6px] border bg-[var(--bar-bg)] text-[var(--text)] focus:outline-none"
+            style={{ borderColor: 'var(--border)' }} />
+          <span className="text-[10px] text-[var(--text-muted)]">—</span>
+          <input type="date" value={cHasta} onChange={(e) => setCHasta(e.target.value)}
+            className="text-[11px] px-1.5 py-1 rounded-[6px] border bg-[var(--bar-bg)] text-[var(--text)] focus:outline-none"
+            style={{ borderColor: 'var(--border)' }} />
+          <button onClick={() => cDesde && cHasta && aplicarRango(cDesde, cHasta)}
+            disabled={!cDesde || !cHasta}
+            className="px-2.5 py-1.5 rounded-[6px] text-[11px] font-medium border border-[var(--border)] text-[var(--text-sub)] hover:bg-[var(--bar-bg)] disabled:opacity-40 transition-colors">
+            Aplicar
+          </button>
+        </div>
+
+        {/* Vista */}
+        <div className="flex rounded-[6px] border border-[var(--border)] overflow-hidden ml-auto">
+          {([['cons', 'Consolidado'], ['bod', 'Por bodega']] as const).map(([id, label]) => (
+            <button key={id}
+              onClick={() => setConsolidado(id === 'cons')}
+              disabled={!!bodegaSel}
+              title={bodegaSel ? 'Con una bodega elegida la vista siempre es por bodega' : undefined}
+              className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors disabled:opacity-40 ${
+                (id === 'cons') === consolidado && !bodegaSel
+                  ? 'bg-[var(--brand-blue)] text-white'
+                  : 'text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
+              }`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Controles */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <div className="relative flex-1 min-w-[220px]">
@@ -141,7 +266,14 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
         <span className="text-[11px] text-[var(--text-sub)]"><span className="font-semibold text-[#22c55e] num">{fmt(tot.valor)}</span></span>
         <span className="text-[11px] text-[var(--text-sub)]">entradas <span className="font-semibold text-[var(--brand-blue)] num">{fmtN(tot.entradas)}</span></span>
         <span className="text-[11px] text-[var(--text-sub)]">salidas <span className="font-semibold text-orange-500 num">{fmtN(tot.salidas)}</span></span>
-        <span className="ml-auto text-[10px] text-[var(--text-muted)]">Clic en entradas o salidas para ver el detalle</span>
+        <span className="text-[11px] text-[var(--text-sub)]">ventas <span className="font-semibold text-[#22c55e] num">{fmtN(tot.ventas)}</span>
+          {tot.ventasPrev > 0 && (
+            <span className={`ml-1 num font-semibold ${tot.ventas >= tot.ventasPrev ? 'text-[#22c55e]' : 'text-red-500'}`}>
+              {tot.ventas >= tot.ventasPrev ? '▲' : '▼'}{Math.abs(Math.round(((tot.ventas - tot.ventasPrev) / tot.ventasPrev) * 100))}%
+            </span>
+          )}
+        </span>
+        <span className="ml-auto text-[10px] text-[var(--text-muted)]">Clic en las cifras para ver el detalle</span>
       </div>
 
       {/* Tabla */}
@@ -154,20 +286,32 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
               <tr>
                 <th className={`${th} text-left`}>Referencia</th>
                 <th className={`${th} text-left`}>Producto</th>
-                <th className={`${th} text-left`}>Bodega</th>
+                {!esConsolidado && <th className={`${th} text-left`}>Bodega</th>}
                 <th className={`${th} text-right`}>Entradas</th>
                 <th className={`${th} text-right`}>Salidas</th>
-                <th className={`${th} text-right`}>Stock</th>
-                <th className={`${th} text-right`}>Valor</th>
-                <th className={`${th} text-right`}>Último mov.</th>
+                <th className={`${th} text-right cursor-pointer select-none hover:text-[var(--text)]`} onClick={() => setOrden('ventas')}
+                  title="Unidades vendidas (facturas) en la ventana — clic para ordenar">
+                  Ventas{orden === 'ventas' ? ' ↓' : ''}
+                </th>
+                <th className={`${th} text-right`} title="Ventas de la ventana vs la ventana anterior de igual longitud">vs ant.</th>
+                <th className={`${th} text-right cursor-pointer select-none hover:text-[var(--text)]`} onClick={() => setOrden('cobertura')}
+                  title="Días que dura el stock al ritmo de venta de la ventana — clic para ordenar">
+                  Cobertura{orden === 'cobertura' ? ' ↑' : ''}
+                </th>
+                <th className={`${th} text-right cursor-pointer select-none hover:text-[var(--text)]`} onClick={() => setOrden('stock')}>
+                  Stock{orden === 'stock' ? ' ↓' : ''}
+                </th>
+                <th className={`${th} text-right cursor-pointer select-none hover:text-[var(--text)]`} onClick={() => setOrden('valor')}>
+                  Valor{orden === 'valor' ? ' ↓' : ''}
+                </th>
               </tr>
             </thead>
             <tbody>
               {filtrados.slice(0, MAX_FILAS).map((p) => (
                 <tr key={`${p.codigo}|${p.bodega}`} className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--nav-hover)] transition-colors">
                   <td className={`${td} num text-[11px] text-[var(--text)]`}>{p.referencia || p.codigo}</td>
-                  <td className={td}><span className="block max-w-[280px] truncate">{p.producto}</span></td>
-                  <td className={`${td} num text-[11px]`}>{p.bodega}</td>
+                  <td className={td}><span className="block max-w-[240px] truncate">{p.producto}</span></td>
+                  {!esConsolidado && <td className={`${td} num text-[11px]`}>{p.bodega}</td>}
                   <td className={`${td} text-right`}>
                     {p.entradasPeriodo > 0 ? (
                       <button onClick={() => abrirDetalle(p, 'entradas')}
@@ -186,9 +330,41 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
                       </button>
                     ) : <span className="num text-[11px] text-[var(--text-muted)]">—</span>}
                   </td>
+                  <td className={`${td} text-right`}>
+                    {p.ventasPeriodo > 0 ? (
+                      <button onClick={() => abrirDetalle(p, 'ventas')}
+                        title={`${p.movsVenta} ${p.movsVenta === 1 ? 'venta' : 'ventas'} — clic para ver`}
+                        className="num text-[11px] font-semibold text-[#16a34a] underline decoration-dotted underline-offset-2 hover:opacity-70">
+                        {fmtN(p.ventasPeriodo)}
+                      </button>
+                    ) : <span className="num text-[11px] text-[var(--text-muted)]">—</span>}
+                  </td>
+                  <td className={`${td} text-right num text-[11px]`}>
+                    {p.ventasPrev > 0 ? (
+                      <span className={p.ventasPeriodo >= p.ventasPrev ? 'text-[#22c55e]' : 'text-red-500'}
+                        title={`Ventana anterior: ${fmtN(p.ventasPrev)} und`}>
+                        {p.ventasPeriodo >= p.ventasPrev ? '▲' : '▼'}{Math.abs(Math.round(((p.ventasPeriodo - p.ventasPrev) / p.ventasPrev) * 100))}%
+                      </span>
+                    ) : p.ventasPeriodo > 0 ? (
+                      <span className="text-[var(--brand-blue)]" title="Sin ventas en la ventana anterior">nuevo</span>
+                    ) : <span className="text-[var(--text-muted)]">—</span>}
+                  </td>
+                  <td className={`${td} text-right num text-[11px]`}>
+                    {(() => {
+                      const c = cobertura(p, diasVentana)
+                      if (c === null) return <span className="text-[var(--text-muted)]">—</span>
+                      if (c === Infinity) return <span className="text-[var(--text-muted)]">sin venta</span>
+                      const dias = Math.round(c)
+                      return (
+                        <span className={dias < 15 ? 'text-red-500 font-semibold' : dias > 180 ? 'text-amber-500' : 'text-[var(--text-sub)]'}
+                          title={`Ritmo: ${(p.ventasPeriodo / diasVentana).toFixed(1)} und/día`}>
+                          {fmtN(dias)} d
+                        </span>
+                      )
+                    })()}
+                  </td>
                   <td className={`${td} text-right num text-[11px] ${p.saldoActual < 0 ? 'text-red-500 font-semibold' : 'text-[var(--text)]'}`}>{fmtN(p.saldoActual)}</td>
                   <td className={`${td} text-right num text-[11px]`}><span className={p.valorActual < 0 ? 'text-red-500' : 'text-[#22c55e]'}>{fmt(p.valorActual)}</span></td>
-                  <td className={`${td} text-right num text-[11px]`}>{p.ultimoMovimiento || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -210,10 +386,10 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
             <div className="flex items-start justify-between px-4 pt-3.5 pb-3 border-b" style={{ borderColor: 'var(--border)' }}>
               <div className="min-w-0 pr-3">
                 <div className="text-[13px] font-semibold text-[var(--text)]">
-                  {popup.dir === 'entradas' ? 'Entradas' : 'Salidas'} — {popup.p.referencia || popup.p.codigo}
+                  {popup.dir === 'entradas' ? 'Entradas' : popup.dir === 'ventas' ? 'Ventas' : 'Salidas'} — {popup.p.referencia || popup.p.codigo}
                 </div>
                 <div className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">{popup.p.producto}</div>
-                <div className="text-[10px] text-[var(--text-muted)] mt-0.5">Bodega {popup.p.bodega} · {periodoLabel}</div>
+                <div className="text-[10px] text-[var(--text-muted)] mt-0.5">{popup.p.bodega ? `Bodega ${popup.p.bodega}` : 'Todas las bodegas'} · {periodoLabel}</div>
               </div>
               <button onClick={() => setPopup(null)}
                 className="text-[var(--text-muted)] hover:text-[var(--text)] text-[16px] leading-none flex-shrink-0">✕</button>
@@ -245,14 +421,16 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
                             <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${
                               popup.dir === 'entradas'
                                 ? 'bg-blue-100 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400'
-                                : 'bg-orange-100 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400'
+                                : popup.dir === 'ventas'
+                                  ? 'bg-green-100 dark:bg-green-950/50 text-green-700 dark:text-green-400'
+                                  : 'bg-orange-100 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400'
                             }`}>
                               {TIPO_LABEL[m.tipo] ?? m.tipo ?? '—'}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-[var(--text-sub)]"><span className="block max-w-[180px] truncate" title={m.transaccion}>{m.transaccion}</span></td>
                           <td className="px-3 py-2 num text-[var(--text)]">{m.documento || '—'}</td>
-                          <td className={`px-3 py-2 text-right num font-semibold ${popup.dir === 'entradas' ? 'text-[var(--brand-blue)]' : 'text-orange-500'}`}>{fmtN(cant)}</td>
+                          <td className={`px-3 py-2 text-right num font-semibold ${popup.dir === 'entradas' ? 'text-[var(--brand-blue)]' : popup.dir === 'ventas' ? 'text-[#16a34a]' : 'text-orange-500'}`}>{fmtN(cant)}</td>
                           <td className="px-3 py-2 text-right num text-[var(--text-sub)]">{fmt(m.unitario)}</td>
                           <td className={`px-3 py-2 text-right num ${m.saldo < 0 ? 'text-red-500 font-semibold' : 'text-[var(--text-sub)]'}`}>{fmtN(m.saldo)}</td>
                         </tr>
@@ -266,7 +444,7 @@ export default function InventarioKardex({ productos, periodoLabel }: Props) {
             {!cargando && !errorPopup && movsFiltrados.length > 0 && (
               <div className="px-4 py-2.5 border-t text-[11px] text-[var(--text-sub)] flex gap-4" style={{ borderColor: 'var(--border)' }}>
                 <span><span className="font-semibold text-[var(--text)] num">{fmtN(movsFiltrados.length)}</span> {movsFiltrados.length === 1 ? 'movimiento' : 'movimientos'}</span>
-                <span><span className={`font-semibold num ${popup.dir === 'entradas' ? 'text-[var(--brand-blue)]' : 'text-orange-500'}`}>
+                <span><span className={`font-semibold num ${popup.dir === 'entradas' ? 'text-[var(--brand-blue)]' : popup.dir === 'ventas' ? 'text-[#16a34a]' : 'text-orange-500'}`}>
                   {fmtN(movsFiltrados.reduce((s, m) => s + (popup.dir === 'entradas' ? m.entradas : m.salidas), 0))}
                 </span> unidades</span>
                 <span className="ml-auto num text-[#22c55e] font-semibold">

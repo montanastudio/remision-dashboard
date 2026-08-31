@@ -13,8 +13,7 @@ import InventarioSaldos from './InventarioSaldos'
 import InventarioBodegas from './InventarioBodegas'
 import TabsInventario from './TabsInventario'
 import InventarioKardex from './InventarioKardex'
-import { agregarKardex, periodoDesdeParams } from '@/lib/kardex'
-import { filtroLabel } from '@/lib/filtro-ventas'
+import { agregarKardex, resolverVentana } from '@/lib/kardex'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,21 +36,20 @@ export default async function InventarioPage({
     const filtroParams = { filtro: sp('filtro'), m: sp('m'), y: sp('y'), desde: sp('desde'), hasta: sp('hasta') }
     let kardexRows: Record<string, string>[] = []
     try { kardexRows = rowsToObjects(await getSheetData('RAW_Kardex')) } catch (e) { console.error('[Inventario] RAW_Kardex:', e) }
-    const periodo = periodoDesdeParams(filtroParams, kardexRows)
-    const productos = agregarKardex(kardexRows, periodo)
-    // Etiqueta con la fecha de referencia del período aplicado
-    const fechaRef = String(periodo.hastaKey === Infinity ? '' : periodo.hastaKey)
-    const label = filtroLabel(filtroParams, /^\d{8}$/.test(fechaRef)
-      ? `${fechaRef.slice(0,4)}-${fechaRef.slice(4,6)}-${Math.min(parseInt(fechaRef.slice(6,8),10),28).toString().padStart(2,'0')}`
-      : undefined)
+
+    // La ventana propia de la pestaña (kdesde/khasta) manda sobre el filtro
+    // global; la ventana anterior de igual longitud alimenta el "vs anterior".
+    const ventana = resolverVentana(sp('kdesde'), sp('khasta'), filtroParams, kardexRows)
+    const productos = agregarKardex(kardexRows, ventana.periodo, ventana.prev)
+
     return (
       <div className="fade-in-up">
         <div className="text-[11px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)] mb-3">
           Inventario
         </div>
         <TabsInventario activeTab={tab} />
-        <Card title="Análisis de Kardex" subtitle={`entradas y salidas del período · ${label}`}>
-          <InventarioKardex productos={productos} periodoLabel={label} />
+        <Card title="Análisis de Kardex" subtitle={`ventas y rotación · ${ventana.label}`}>
+          <InventarioKardex productos={productos} periodoLabel={ventana.label} diasVentana={ventana.dias} />
         </Card>
       </div>
     )
