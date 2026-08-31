@@ -6,6 +6,7 @@ const TABS = [
   { key: 'bodegas',   label: 'Bodegas',         href: '/inventario' },
   { key: 'saldos',    label: 'Saldos Físicos',  href: '/inventario?tab=saldos' },
   { key: 'sin-rotar', label: 'Sin Rotar',       href: '/inventario?tab=sin-rotar' },
+  { key: 'kardex',    label: 'Kardex',          href: '/inventario?tab=kardex' },
 ]
 
 export default function TabsInventario({ activeTab }: { activeTab: string }) {

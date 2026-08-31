@@ -70,6 +70,7 @@ export type SheetName =
   | 'RAW_Inventario'
   | 'RAW_Inventario_Stock'
   | 'RAW_Movimientos'
+  | 'RAW_Kardex'
   | 'RES_Inventario_Linea'
   | 'RES_Inventario_Bodegas'
   // Hojas de configuración

@@ -12,6 +12,9 @@ import InventarioSinRotar from './InventarioSinRotar'
 import InventarioSaldos from './InventarioSaldos'
 import InventarioBodegas from './InventarioBodegas'
 import TabsInventario from './TabsInventario'
+import InventarioKardex from './InventarioKardex'
+import { agregarKardex, periodoDesdeParams } from '@/lib/kardex'
+import { filtroLabel } from '@/lib/filtro-ventas'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,7 +28,34 @@ export default async function InventarioPage({
   const perms = await getPermissions()
   if (!canAccess(role, 'inventario', perms)) redirect('/resumen')
 
-  const tab = (Array.isArray(searchParams.tab) ? searchParams.tab[0] : searchParams.tab) ?? 'bodegas'
+  const sp = (k: string) => (Array.isArray(searchParams[k]) ? searchParams[k]![0] : searchParams[k] ?? undefined)
+  const tab = sp('tab') ?? 'bodegas'
+
+  // ── Tab Kardex: análisis de movimientos por producto × bodega ────────
+  // Se resuelve antes que el resto para no cargar las otras hojas en vano.
+  if (tab === 'kardex') {
+    const filtroParams = { filtro: sp('filtro'), m: sp('m'), y: sp('y'), desde: sp('desde'), hasta: sp('hasta') }
+    let kardexRows: Record<string, string>[] = []
+    try { kardexRows = rowsToObjects(await getSheetData('RAW_Kardex')) } catch (e) { console.error('[Inventario] RAW_Kardex:', e) }
+    const periodo = periodoDesdeParams(filtroParams, kardexRows)
+    const productos = agregarKardex(kardexRows, periodo)
+    // Etiqueta con la fecha de referencia del período aplicado
+    const fechaRef = String(periodo.hastaKey === Infinity ? '' : periodo.hastaKey)
+    const label = filtroLabel(filtroParams, /^\d{8}$/.test(fechaRef)
+      ? `${fechaRef.slice(0,4)}-${fechaRef.slice(4,6)}-${Math.min(parseInt(fechaRef.slice(6,8),10),28).toString().padStart(2,'0')}`
+      : undefined)
+    return (
+      <div className="fade-in-up">
+        <div className="text-[11px] font-semibold uppercase tracking-[1px] text-[var(--text-muted)] mb-3">
+          Inventario
+        </div>
+        <TabsInventario activeTab={tab} />
+        <Card title="Análisis de Kardex" subtitle={`entradas y salidas del período · ${label}`}>
+          <InventarioKardex productos={productos} periodoLabel={label} />
+        </Card>
+      </div>
+    )
+  }
 
   type Row = Record<string, string>
   let inventario: Row[] = []
