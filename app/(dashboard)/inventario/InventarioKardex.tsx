@@ -55,6 +55,8 @@ export default function InventarioKardex({ productos, periodoLabel, diasVentana 
   const [cDesde, setCDesde] = useState(searchParams.get('kdesde') ?? '')
   const [cHasta, setCHasta] = useState(searchParams.get('khasta') ?? '')
   const [popup, setPopup] = useState<{ p: ProductoKardex; dir: 'entradas' | 'salidas' | 'ventas' } | null>(null)
+  const [resumenAbierto, setResumenAbierto] = useState(false)
+  const [verRotacion, setVerRotacion] = useState(false)
   const [movs, setMovs] = useState<MovimientoKardex[] | null>(null)
   const [cargando, setCargando] = useState(false)
   const [errorPopup, setErrorPopup] = useState('')
@@ -260,9 +262,20 @@ export default function InventarioKardex({ productos, periodoLabel, diasVentana 
           }`}>
           {soloMov ? '✓ Con movimiento' : 'Con movimiento'}
         </button>
+
+        <button onClick={() => { const v = !verRotacion; setVerRotacion(v); if (!v && (orden === 'cobertura' || orden === 'ventas')) setOrden('valor') }}
+          title="Muestra las columnas de tendencia (vs anterior) y cobertura de stock"
+          className={`px-3 py-2 rounded-[6px] text-[11px] font-medium border transition-colors ${
+            verRotacion
+              ? 'bg-[var(--brand-blue)] text-white border-[var(--brand-blue)]'
+              : 'border-[var(--border)] text-[var(--text-sub)] hover:bg-[var(--bar-bg)]'
+          }`}>
+          {verRotacion ? '✓ Rotación' : 'Rotación'}
+        </button>
       </div>
 
-      {/* Fichas del período: saldo inicial → movimientos → saldo final */}
+      {/* Fichas del período: solo cuando hay una ventana de fechas activa */}
+      {rangoActivo !== 'global' && (
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
         <div className="rounded-[8px] border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
           <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Saldo inicial del período</div>
@@ -292,24 +305,43 @@ export default function InventarioKardex({ productos, periodoLabel, diasVentana 
           </div>
         </div>
       </div>
+      )}
 
-      {/* Resumen */}
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 mb-2 px-2.5 py-2 rounded-[6px] bg-[var(--bar-bg)]">
-        <span className="text-[11px] text-[var(--text-muted)]">{periodoLabel}</span>
-        <span className="text-[11px] text-[var(--text-sub)]"><span className="font-semibold text-[var(--text)] num">{fmtN(filtrados.length)}</span> productos</span>
-        <span className="text-[11px] text-[var(--text-sub)]">stock <span className="font-semibold text-[var(--text)] num">{fmtN(tot.stock)}</span> und</span>
-        <span className="text-[11px] text-[var(--text-sub)]"><span className="font-semibold text-[#22c55e] num">{fmt(tot.valor)}</span></span>
-        <span className="text-[11px] text-[var(--text-sub)]">entradas <span className="font-semibold text-[var(--brand-blue)] num">{fmtN(tot.entradas)}</span></span>
-        <span className="text-[11px] text-[var(--text-sub)]">salidas <span className="font-semibold text-orange-500 num">{fmtN(tot.salidas)}</span></span>
-        <span className="text-[11px] text-[var(--text-sub)]">ventas <span className="font-semibold text-[#22c55e] num">{fmtN(tot.ventas)}</span>
-          {tot.ventasPrev > 0 && (
-            <span className={`ml-1 num font-semibold ${tot.ventas >= tot.ventasPrev ? 'text-[#22c55e]' : 'text-red-500'}`}>
-              {tot.ventas >= tot.ventasPrev ? '▲' : '▼'}{Math.abs(Math.round(((tot.ventas - tot.ventasPrev) / tot.ventasPrev) * 100))}%
-            </span>
+      {/* Resumen plegable — cerrado por defecto */}
+      <button
+        onClick={() => setResumenAbierto((v) => !v)}
+        className="w-full text-left mb-2 px-2.5 py-2 rounded-[6px] bg-[var(--bar-bg)] hover:bg-[var(--nav-hover)] transition-colors">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"
+              strokeLinecap="round" strokeLinejoin="round"
+              className={`transition-transform ${resumenAbierto ? 'rotate-90' : ''}`}>
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+            {periodoLabel}
+          </span>
+          <span className="text-[11px] text-[var(--text-sub)]"><span className="font-semibold text-[var(--text)] num">{fmtN(filtrados.length)}</span> productos</span>
+          {!resumenAbierto && (
+            <span className="ml-auto text-[10px] text-[var(--text-muted)]">Ver totales</span>
           )}
-        </span>
-        <span className="ml-auto text-[10px] text-[var(--text-muted)]">Clic en las cifras para ver el detalle</span>
-      </div>
+          {resumenAbierto && (
+            <>
+              <span className="text-[11px] text-[var(--text-sub)]">stock <span className="font-semibold text-[var(--text)] num">{fmtN(tot.stock)}</span> und</span>
+              <span className="text-[11px] text-[var(--text-sub)]"><span className="font-semibold text-[#22c55e] num">{fmt(tot.valor)}</span></span>
+              <span className="text-[11px] text-[var(--text-sub)]">entradas <span className="font-semibold text-[var(--brand-blue)] num">{fmtN(tot.entradas)}</span></span>
+              <span className="text-[11px] text-[var(--text-sub)]">salidas <span className="font-semibold text-orange-500 num">{fmtN(tot.salidas)}</span></span>
+              <span className="text-[11px] text-[var(--text-sub)]">ventas <span className="font-semibold text-[#22c55e] num">{fmtN(tot.ventas)}</span>
+                {tot.ventasPrev > 0 && (
+                  <span className={`ml-1 num font-semibold ${tot.ventas >= tot.ventasPrev ? 'text-[#22c55e]' : 'text-red-500'}`}>
+                    {tot.ventas >= tot.ventasPrev ? '▲' : '▼'}{Math.abs(Math.round(((tot.ventas - tot.ventasPrev) / tot.ventasPrev) * 100))}%
+                  </span>
+                )}
+              </span>
+              <span className="ml-auto text-[10px] text-[var(--text-muted)]">Clic en las cifras de la tabla para ver el detalle</span>
+            </>
+          )}
+        </div>
+      </button>
 
       {/* Tabla */}
       {filtrados.length === 0 ? (
@@ -324,15 +356,15 @@ export default function InventarioKardex({ productos, periodoLabel, diasVentana 
                 {!esConsolidado && <th className={`${th} text-left`}>Bodega</th>}
                 <th className={`${th} text-right`}>Entradas</th>
                 <th className={`${th} text-right`}>Salidas</th>
-                <th className={`${th} text-right cursor-pointer select-none hover:text-[var(--text)]`} onClick={() => setOrden('ventas')}
-                  title="Unidades vendidas (facturas) en la ventana — clic para ordenar">
-                  Ventas{orden === 'ventas' ? ' ↓' : ''}
-                </th>
-                <th className={`${th} text-right`} title="Ventas de la ventana vs la ventana anterior de igual longitud">vs ant.</th>
-                <th className={`${th} text-right cursor-pointer select-none hover:text-[var(--text)]`} onClick={() => setOrden('cobertura')}
-                  title="Días que dura el stock al ritmo de venta de la ventana — clic para ordenar">
-                  Cobertura{orden === 'cobertura' ? ' ↑' : ''}
-                </th>
+                {verRotacion && (
+                  <>
+                    <th className={`${th} text-right`} title="Ventas de la ventana vs la ventana anterior de igual longitud">vs ant.</th>
+                    <th className={`${th} text-right cursor-pointer select-none hover:text-[var(--text)]`} onClick={() => setOrden('cobertura')}
+                      title="Días que dura el stock al ritmo de venta de la ventana — clic para ordenar">
+                      Cobertura{orden === 'cobertura' ? ' ↑' : ''}
+                    </th>
+                  </>
+                )}
                 <th className={`${th} text-right cursor-pointer select-none hover:text-[var(--text)]`} onClick={() => setOrden('stock')}>
                   Stock{orden === 'stock' ? ' ↓' : ''}
                 </th>
@@ -365,15 +397,8 @@ export default function InventarioKardex({ productos, periodoLabel, diasVentana 
                       </button>
                     ) : <span className="num text-[11px] text-[var(--text-muted)]">—</span>}
                   </td>
-                  <td className={`${td} text-right`}>
-                    {p.ventasPeriodo > 0 ? (
-                      <button onClick={() => abrirDetalle(p, 'ventas')}
-                        title={`${p.movsVenta} ${p.movsVenta === 1 ? 'venta' : 'ventas'} — clic para ver`}
-                        className="num text-[11px] font-semibold text-[#16a34a] underline decoration-dotted underline-offset-2 hover:opacity-70">
-                        {fmtN(p.ventasPeriodo)}
-                      </button>
-                    ) : <span className="num text-[11px] text-[var(--text-muted)]">—</span>}
-                  </td>
+                  {verRotacion && (
+                  <>
                   <td className={`${td} text-right num text-[11px]`}>
                     {p.ventasPrev > 0 ? (
                       <span className={p.ventasPeriodo >= p.ventasPrev ? 'text-[#22c55e]' : 'text-red-500'}
@@ -398,6 +423,8 @@ export default function InventarioKardex({ productos, periodoLabel, diasVentana 
                       )
                     })()}
                   </td>
+                  </>
+                  )}
                   <td className={`${td} text-right num text-[11px] ${p.saldoActual < 0 ? 'text-red-500 font-semibold' : 'text-[var(--text)]'}`}>{fmtN(p.saldoActual)}</td>
                   <td className={`${td} text-right num text-[11px]`}><span className={p.valorActual < 0 ? 'text-red-500' : 'text-[#22c55e]'}>{fmt(p.valorActual)}</span></td>
                 </tr>
