@@ -49,6 +49,12 @@ export interface ProductoKardex {
   movsVenta: number
   /** Ventas de la ventana inmediatamente anterior, para comparar tendencia */
   ventasPrev: number
+  /** Saldo y valor justo ANTES del primer día de la ventana */
+  saldoInicial: number
+  valorInicial: number
+  /** Saldo y valor al cierre del último día de la ventana */
+  saldoFinal: number
+  valorFinal: number
   ultimoMovimiento: string // DD/MM/YYYY del último movimiento real (no saldo inicial)
 }
 
@@ -83,6 +89,8 @@ export function agregarKardex(
   periodoPrev: PeriodoKardex | null = null
 ): ProductoKardex[] {
   const map = new Map<string, ProductoKardex>()
+  // Grupos cuya primera fila dentro de la ventana ya fijó el saldo inicial
+  const inicialFijado = new Set<string>()
 
   for (const r of rows) {
     const codigo = (r['Código'] ?? '').trim()
@@ -100,6 +108,7 @@ export function agregarKardex(
         saldoActual: 0, valorActual: 0, unitario: 0,
         entradasPeriodo: 0, salidasPeriodo: 0, movsEntrada: 0, movsSalida: 0,
         ventasPeriodo: 0, movsVenta: 0, ventasPrev: 0,
+        saldoInicial: 0, valorInicial: 0, saldoFinal: 0, valorFinal: 0,
         ultimoMovimiento: '',
       }
       map.set(key, p)
@@ -107,16 +116,37 @@ export function agregarKardex(
     // Algunas filas (13 productos) vienen sin referencia; usar la primera no vacía
     if (!p.referencia && r['Referencia']) p.referencia = r['Referencia'].trim()
 
+    const esInicial = (r['Transacción'] ?? '').trim() === 'SALDO INICIAL'
+    const k = fechaKey(r['Fecha'])
+    const saldo = num(r['Saldo'])
+    const valor = num(r['Vr. Existencia ($)'])
+
+    // Frontera de entrada: la primera fila que cae DENTRO de la ventana fija
+    // el saldo inicial con lo que había hasta la fila anterior (el saldo
+    // corrido ya acumulado). Si el grupo nunca entra a la ventana, el saldo
+    // inicial queda igual al último saldo previo (se ajusta al final).
+    if (!esInicial && k >= periodo.desdeKey && !inicialFijado.has(key)) {
+      p.saldoInicial = p.saldoActual
+      p.valorInicial = p.valorActual
+      inicialFijado.add(key)
+    }
+
     // El saldo corrido: la última fila del grupo manda
-    p.saldoActual = num(r['Saldo'])
-    p.valorActual = num(r['Vr. Existencia ($)'])
+    p.saldoActual = saldo
+    p.valorActual = valor
     p.unitario    = num(r['Vr. Unitario ($)'])
 
-    const esInicial = (r['Transacción'] ?? '').trim() === 'SALDO INICIAL'
+    // Frontera de salida: el último saldo con fecha dentro de la ventana es
+    // el saldo final del período (el corrido de saldos iniciales cuenta como
+    // punto de partida, no como movimiento).
+    if (k <= periodo.hastaKey) {
+      p.saldoFinal = saldo
+      p.valorFinal = valor
+    }
+
     if (!esInicial && r['Fecha']) p.ultimoMovimiento = r['Fecha']
 
     if (esInicial) continue
-    const k = fechaKey(r['Fecha'])
     const tipo = (r['Tipo'] ?? '').trim()
     const s = num(r['Salidas'])
 
@@ -132,6 +162,14 @@ export function agregarKardex(
       if (TIPOS_VENTA.includes(tipo)) { p.ventasPeriodo += s; p.movsVenta++ }
     }
   }
+
+  map.forEach((p, key) => {
+    if (!inicialFijado.has(key)) {
+      // Sin movimientos dentro de la ventana: el saldo no cambió en el rango
+      p.saldoInicial = p.saldoFinal
+      p.valorInicial = p.valorFinal
+    }
+  })
 
   return Array.from(map.values())
     .filter((p) => p.saldoActual !== 0 || p.entradasPeriodo > 0 || p.salidasPeriodo > 0 || p.ventasPrev > 0)
@@ -157,6 +195,10 @@ export function consolidarPorProducto(productos: ProductoKardex[]): ProductoKard
     e.ventasPeriodo += p.ventasPeriodo
     e.movsVenta += p.movsVenta
     e.ventasPrev += p.ventasPrev
+    e.saldoInicial += p.saldoInicial
+    e.valorInicial += p.valorInicial
+    e.saldoFinal += p.saldoFinal
+    e.valorFinal += p.valorFinal
     if (!e.referencia && p.referencia) e.referencia = p.referencia
     if (fechaKey(p.ultimoMovimiento) > fechaKey(e.ultimoMovimiento)) e.ultimoMovimiento = p.ultimoMovimiento
     e.unitario = e.saldoActual !== 0 ? e.valorActual / e.saldoActual : p.unitario

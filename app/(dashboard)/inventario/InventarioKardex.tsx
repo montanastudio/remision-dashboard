@@ -104,6 +104,10 @@ export default function InventarioKardex({ productos, periodoLabel, diasVentana 
     salidas:  filtrados.reduce((s, p) => s + p.salidasPeriodo, 0),
     ventas:   filtrados.reduce((s, p) => s + p.ventasPeriodo, 0),
     ventasPrev: filtrados.reduce((s, p) => s + p.ventasPrev, 0),
+    saldoIni: filtrados.reduce((s, p) => s + p.saldoInicial, 0),
+    valorIni: filtrados.reduce((s, p) => s + p.valorInicial, 0),
+    saldoFin: filtrados.reduce((s, p) => s + p.saldoFinal, 0),
+    valorFin: filtrados.reduce((s, p) => s + p.valorFinal, 0),
   }), [filtrados])
 
   function aplicarRango(desde: string, hasta: string) {
@@ -256,6 +260,37 @@ export default function InventarioKardex({ productos, periodoLabel, diasVentana 
           }`}>
           {soloMov ? '✓ Con movimiento' : 'Con movimiento'}
         </button>
+      </div>
+
+      {/* Fichas del período: saldo inicial → movimientos → saldo final */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-3">
+        <div className="rounded-[8px] border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">Saldo inicial del período</div>
+          <div className="text-[17px] font-bold num text-[var(--text)] leading-tight">{fmtN(tot.saldoIni)} <span className="text-[11px] font-normal text-[var(--text-muted)]">und</span></div>
+          <div className="text-[10px] num text-[var(--text-muted)]">{fmt(tot.valorIni)}</div>
+        </div>
+        <div className="rounded-[8px] border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">+ Entradas del período</div>
+          <div className="text-[17px] font-bold num text-[var(--brand-blue)] leading-tight">{fmtN(tot.entradas)} <span className="text-[11px] font-normal text-[var(--text-muted)]">und</span></div>
+          <div className="text-[10px] text-[var(--text-muted)]">{fmtN(filtrados.reduce((s, p) => s + p.movsEntrada, 0))} movimientos</div>
+        </div>
+        <div className="rounded-[8px] border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">− Salidas del período</div>
+          <div className="text-[17px] font-bold num text-orange-500 leading-tight">{fmtN(tot.salidas)} <span className="text-[11px] font-normal text-[var(--text-muted)]">und</span></div>
+          <div className="text-[10px] text-[var(--text-muted)]">
+            {fmtN(filtrados.reduce((s, p) => s + p.movsSalida, 0))} movimientos · ventas <span className="num font-semibold text-[#16a34a]">{fmtN(tot.ventas)}</span>
+          </div>
+        </div>
+        <div className="rounded-[8px] border border-[var(--border)] bg-[var(--card)] px-3 py-2.5">
+          <div className="text-[9px] uppercase tracking-wider text-[var(--text-muted)] mb-0.5">= Saldo final del período</div>
+          <div className="text-[17px] font-bold num text-[var(--text)] leading-tight">{fmtN(tot.saldoFin)} <span className="text-[11px] font-normal text-[var(--text-muted)]">und</span></div>
+          <div className="text-[10px] num text-[var(--text-muted)]">
+            {fmt(tot.valorFin)}
+            {tot.saldoIni + tot.entradas - tot.salidas === tot.saldoFin
+              ? <span className="ml-1.5 text-[#22c55e]" title="Inicial + entradas − salidas = final">✓ cuadra</span>
+              : <span className="ml-1.5 text-amber-500" title={`Inicial + entradas − salidas = ${fmtN(tot.saldoIni + tot.entradas - tot.salidas)}`}>Δ {fmtN(tot.saldoFin - (tot.saldoIni + tot.entradas - tot.salidas))}</span>}
+          </div>
+        </div>
       </div>
 
       {/* Resumen */}
