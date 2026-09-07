@@ -1,7 +1,32 @@
 import { google } from 'googleapis'
+import { leerRaw, limpiarCacheRaw, ultimaCargaRaw } from './drive-raw'
+import {
+  adaptVentas, adaptCartera, adaptRecaudo, adaptMovimiento,
+  adaptKardex, adaptInventario, filtrarVentasPorAño, filtrarConStock,
+} from './raw-adapters'
 export { parseFecha } from './fecha'
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_ID!
+
+/**
+ * Hojas de configuración que el dashboard LEE Y ESCRIBE (usuarios, permisos,
+ * metas, zonas). Pueden vivir en un spreadsheet aparte —el "NO BORRAR" de la
+ * carpeta de Drive— indicándolo en GOOGLE_SHEETS_ID_CONFIG.
+ *
+ * OJO: ese spreadsheet necesita permiso de EDITOR para la cuenta de servicio,
+ * no solo lector: con acceso de lectura, crear usuarios, guardar permisos o
+ * editar metas falla en tiempo de ejecución. Mientras la variable no esté,
+ * todo sigue saliendo del spreadsheet de siempre.
+ */
+const HOJAS_CONFIG: readonly string[] = [
+  'LS_Usuarios', 'LS_Permisos', 'LS METAS Y PROYECCION',
+  'LS_METAS_VENDEDORES', 'LS_METAS_VENDEDOR', 'LS_MINIMOS', 'LS_ZONAS',
+]
+
+function spreadsheetDe(sheetName: SheetName): string {
+  const config = process.env.GOOGLE_SHEETS_ID_CONFIG
+  return config && HOJAS_CONFIG.includes(sheetName) ? config : SPREADSHEET_ID
+}
 
 // Simple in-memory cache to avoid hitting Sheets API rate limits.
 // TTL: 30 s — stale data per-30s is acceptable for a management dashboard.
@@ -27,6 +52,9 @@ function getAuth(write = false) {
  * Devuelve null si la Drive API no está habilitada o falla (degradación limpia).
  */
 export async function getSpreadsheetModifiedTime(): Promise<string | null> {
+  // Con los RAW_* viniendo de la carpeta, la "última carga" es la del corte más
+  // reciente que hay en ella, no la del spreadsheet de configuración.
+  if (usaCarpetaDrive()) return ultimaCargaRaw()
   try {
     const auth = new google.auth.GoogleAuth({
       credentials: {
@@ -82,20 +110,71 @@ export type SheetName =
   | 'LS_MINIMOS'
   | 'LS_ZONAS'
 
+/**
+ * ¿Los RAW_* se leen de la carpeta de Drive? Si la variable no está, todo sigue
+ * saliendo del spreadsheet de siempre — quitarla es el rollback completo.
+ */
+function usaCarpetaDrive(): boolean {
+  return !!process.env.GOOGLE_DRIVE_RAW_FOLDER_ID
+}
+
+/**
+ * Hojas que ahora se arman desde los archivos crudos de la carpeta. El resto
+ * (LS_* de configuración, RES_* de resumen, histórico 2025) sigue viviendo en el
+ * spreadsheet, que además es donde el dashboard escribe.
+ *
+ * Cada rama devuelve los MISMOS encabezados que emitía la hoja, así que para
+ * quien llama a getSheetData no cambia nada.
+ */
+async function desdeCarpetaDrive(sheetName: SheetName): Promise<string[][] | null> {
+  switch (sheetName) {
+    case 'RAW_Ventas':
+      return adaptVentas((await leerRaw('ventas')).filas)
+    case 'RAW_Ventas_2025':
+    case 'RAW_Ventas_2026':
+      return filtrarVentasPorAño(
+        adaptVentas((await leerRaw('ventas')).filas),
+        sheetName === 'RAW_Ventas_2025' ? 2025 : 2026,
+      )
+    case 'RAW_Cartera': {
+      const { filas, archivo } = await leerRaw('cartera')
+      // El corte del archivo es la referencia para los días desde factura.
+      return adaptCartera(filas, archivo.corte)
+    }
+    case 'RAW_Recibos':
+      return adaptRecaudo((await leerRaw('recaudo')).filas)
+    case 'RAW_Movimientos':
+      return adaptMovimiento((await leerRaw('movimiento')).filas)
+    case 'RAW_Kardex':
+      return adaptKardex((await leerRaw('kardex')).filas)
+    case 'RAW_Inventario':
+      return adaptInventario((await leerRaw('inventario')).filas)
+    case 'RAW_Inventario_Stock':
+      return filtrarConStock(adaptInventario((await leerRaw('inventario')).filas))
+    default:
+      return null
+  }
+}
+
 export async function getSheetData(sheetName: SheetName): Promise<string[][]> {
   const now = Date.now()
   const hit = _cache.get(sheetName)
   if (hit && now - hit.ts < CACHE_TTL) return hit.data
 
-  const auth = getAuth()
-  const sheets = google.sheets({ version: 'v4', auth })
+  let data: string[][] | null = null
+  if (usaCarpetaDrive()) data = await desdeCarpetaDrive(sheetName)
 
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: SPREADSHEET_ID,
-    range: sheetName,
-  })
+  if (data === null) {
+    const auth = getAuth()
+    const sheets = google.sheets({ version: 'v4', auth })
 
-  const data = (response.data.values ?? []) as string[][]
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: spreadsheetDe(sheetName),
+      range: sheetName,
+    })
+    data = (response.data.values ?? []) as string[][]
+  }
+
   _cache.set(sheetName, { data, ts: now })
   return data
 }
@@ -103,6 +182,9 @@ export async function getSheetData(sheetName: SheetName): Promise<string[][]> {
 /** Limpia el caché completo o una hoja específica. Útil para forzar re-fetch. */
 export function clearCache(sheetName?: SheetName) {
   if (sheetName) { _cache.delete(sheetName) } else { _cache.clear() }
+  // El botón de sincronizar debe recoger también el corte del día que acaban de
+  // subir, así que se re-resuelve la carpeta.
+  if (!sheetName) limpiarCacheRaw()
 }
 
 export async function appendSheetRow(sheetName: SheetName, values: string[]): Promise<void> {
@@ -110,7 +192,7 @@ export async function appendSheetRow(sheetName: SheetName, values: string[]): Pr
   const sheets = google.sheets({ version: 'v4', auth })
 
   await sheets.spreadsheets.values.append({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetDe(sheetName),
     range: `${sheetName}!A1`,
     valueInputOption: 'RAW',
     requestBody: { values: [values] },
@@ -126,7 +208,7 @@ export async function updateSheetRow(
   const sheets = google.sheets({ version: 'v4', auth })
 
   await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetDe(sheetName),
     range: `${sheetName}!A${rowIndex}`,
     valueInputOption: 'RAW',
     requestBody: { values: [values] },
@@ -137,13 +219,13 @@ export async function createTabIfMissing(sheetName: SheetName): Promise<boolean>
   const auth = getAuth(true)
   const sheets = google.sheets({ version: 'v4', auth })
   const meta = await sheets.spreadsheets.get({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetDe(sheetName),
     fields: 'sheets.properties.title',
   })
   const existing = (meta.data.sheets ?? []).map((s) => s.properties?.title)
   if (existing.includes(sheetName)) return false
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetDe(sheetName),
     requestBody: { requests: [{ addSheet: { properties: { title: sheetName } } }] },
   })
   return true
@@ -154,7 +236,7 @@ export async function setSheetData(sheetName: SheetName, values: string[][]): Pr
   const sheets = google.sheets({ version: 'v4', auth })
   await createTabIfMissing(sheetName)
   await sheets.spreadsheets.values.update({
-    spreadsheetId: SPREADSHEET_ID,
+    spreadsheetId: spreadsheetDe(sheetName),
     range: `${sheetName}!A1`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values },
