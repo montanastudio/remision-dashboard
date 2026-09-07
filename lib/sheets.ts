@@ -294,6 +294,13 @@ export function normalizeVentasColumns(rows: Record<string, string>[]): Record<s
     NCLIENTE:   r['Cliente']        ?? r['NCLIENTE']    ?? '',
     CIUDAD:     r['Ciudad']         ?? r['CIUDAD']      ?? '',
     COSTO:      r['Costo ($)']      ?? r['COSTO']       ?? '',
+    // Valor comparable entre años. Hasta el 31/10/2025 el ERP no incluía el IVA
+    // en VRTOTAL y desde el 1/11/2025 sí, así que sumar VRTOTAL de dos años
+    // seguidos compara bases distintas y subestima el año viejo en un 19%.
+    // Esta columna deja todo sobre la base con IVA: para 2026 vale lo mismo que
+    // VRTOTAL, para 2025 lleva el ajuste. Úsala SOLO en comparaciones año contra
+    // año; para lo facturado tal cual sigue VRTOTAL.
+    VRTOTAL_COMPARABLE: r['Vr. Neto ($)'] ?? r['Vr. con IVA ($)'] ?? r['VRTOTAL'] ?? '',
     FACTURA:    r['Factura']        ?? r['FACTURA']     ?? '',
     DEVOLUCION: r['Devolución']     ?? r['DEVOLUCION']  ?? '',
   }))

@@ -120,11 +120,14 @@ export default async function VendedoresPage({
     })
   })
 
-  // Total año anterior: primero intenta desde rawVentas, si no, usa RES_Ventas_Mensual
+  // Total año anterior: primero intenta desde rawVentas, si no, usa RES_Ventas_Mensual.
+  // Se usa el valor comparable, no VRTOTAL: hasta el 31/10/2025 el ERP no incluía
+  // IVA y desde noviembre sí, así que el año viejo sale un 19% corto si se suma
+  // crudo. Es la misma base que usa la tendencia del resumen.
   rawVentas.forEach(r => {
     const fecha = parseFecha(r['FECHA'])
     if (fecha && fecha.year === añoAnterior) {
-      totalAnterior += parseNum(r['VRTOTAL'])
+      totalAnterior += parseNum(r['VRTOTAL_COMPARABLE'] || r['VRTOTAL'])
     }
   })
   if (totalAnterior === 0 && ventasMensual.length > 0) {
@@ -133,7 +136,10 @@ export default async function VendedoresPage({
       const añoEnMes = mesLabel.match(/\b(20\d{2})\b/)?.[1]
       const año = parseInt(r['Año'] ?? r['AÑO'] ?? añoEnMes ?? '0', 10)
       if (año !== añoAnterior) return
-      totalAnterior += parseNum(r['Valor Bruto ($)'] ?? r['VALOR'] ?? r['Vr. Total ($)'] ?? r['Total'] ?? '')
+      // 'Vr. con IVA ($)' es el valor ya ajustado de esa hoja; las columnas que
+      // se pedían antes ('Valor Bruto ($)', 'VALOR', 'Vr. Total ($)', 'Total')
+      // no existen en ella, así que este respaldo sumaba siempre cero.
+      totalAnterior += parseNum(r['Vr. con IVA ($)'] ?? r['Valor Bruto ($)'] ?? '')
     })
   }
 

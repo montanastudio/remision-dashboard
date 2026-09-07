@@ -58,7 +58,10 @@ export async function POST() {
     if (mesIdx < 0 || mesIdx > 11) return
 
     const vend  = r['NVENDEDOR']?.trim() ?? ''
-    const valor = parseNum(r['VRTOTAL'])
+    // Base comparable, no VRTOTAL: la meta del año nuevo se calcula sobre el año
+    // anterior, y hasta el 31/10/2025 el ERP no incluía IVA. Sumando crudo, la
+    // base de 2025 queda un 19% corta y las metas salen bajas.
+    const valor = parseNum(r['VRTOTAL_COMPARABLE'] || r['VRTOTAL'])
     if (!vend || !valor) return
 
     const vo = VENDEDORES_OBJETIVO.find(v => matchVendor(vend, v.match))

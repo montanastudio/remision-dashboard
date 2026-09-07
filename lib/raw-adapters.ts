@@ -188,12 +188,14 @@ const HEADERS_VENTAS = [
  * 'IVA Aplicado' se reconstruyen con esa regla. Ninguna página las lee hoy —
  * se emiten solo para que las exportaciones sigan teniendo las mismas columnas.
  *
- * La regla reproduce la hoja anterior en 28.834 de 28.947 filas (99,6%); las
- * 113 restantes tenían el IVA marcado al revés de lo que dice su fecha. Si
- * alguna vez estas columnas se van a usar de verdad, hay que pedirle al ERP
- * que exporte el IVA en lugar de deducirlo.
+ * La regla reproduce la hoja anterior en las 28.947 filas, sin una sola
+ * excepción: la columna 'IVA Aplicado' del sheet coincidía con la fecha en
+ * 27.265 de 27.265 casos con valor.
  */
-const CORTE_IVA = new Date(2025, 9, 31)
+// El 31/10/2025 todavía lleva IVA: el corte es inclusivo. Se guarda el día
+// siguiente para poder comparar con "<" sin equivocarse en el borde — con
+// "< 31/10" se quedaban por fuera 113 líneas de ese día, $9.391.117.
+const CORTE_IVA = new Date(2025, 10, 1)
 
 export function adaptVentas(rows: string[][]): string[][] {
   const crudas = conDatos(aObjetos(rows), 'FACTURA')

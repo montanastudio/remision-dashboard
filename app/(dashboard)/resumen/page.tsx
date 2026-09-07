@@ -94,7 +94,12 @@ export default async function ResumenPage({
     if (!fecha) return
     const { mes: mesIdx, year: añoVal } = fecha
     if (mesIdx < 0 || mesIdx > 11) return
-    const valor    = parseNum(r['VRTOTAL'])
+    // La tendencia enfrenta dos años, así que usa el valor comparable: hasta el
+    // 31/10/2025 el ERP no incluía IVA en VRTOTAL y desde noviembre sí. Sin este
+    // ajuste el año anterior sale un 19% por debajo y el crecimiento se infla.
+    // Para 2026 VRTOTAL_COMPARABLE es igual a VRTOTAL, así que el año actual no
+    // cambia.
+    const valor    = parseNum(r['VRTOTAL_COMPARABLE'] || r['VRTOTAL'])
     const cantidad = parseNum(r['CANTIDAD'])
     const mes = MESES[mesIdx]
     if (añoVal === añoActual) {
@@ -106,7 +111,12 @@ export default async function ResumenPage({
     }
   })
 
-  // ── Poblar anterior desde RES_Ventas_Mensual (datos 2025 no presentes en RAW_Ventas) ──
+  // ── Respaldo desde RES_Ventas_Mensual, para meses sin dato en RAW_Ventas ──
+  // Esta hoja usa 'Vr. con IVA ($)' (el valor ya ajustado, misma base que
+  // VRTOTAL_COMPARABLE). Antes se pedían 'Valor Bruto ($)' / 'VALOR' /
+  // 'Vr. Total ($)' / 'Total', columnas que la hoja nunca tuvo: el fallback
+  // sumaba siempre cero. Hoy RAW_Ventas cubre 2025 completo, así que esto casi
+  // nunca entra; queda por si en el futuro el rango de ventas se recorta.
   const MESES_ES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
   ventasMensual.forEach(r => {
     const mesLabel = (r['Mes'] ?? r['MES'] ?? '').toLowerCase().trim()
@@ -119,7 +129,7 @@ export default async function ResumenPage({
     const mes = MESES[mesIdx]
     // Solo sumar si el loop de ventas.forEach no llenó ya esos valores (para evitar doble conteo)
     if (trendMap[mes].anterior === 0) {
-      trendMap[mes].anterior    += parseNum(r['Valor Bruto ($)'] ?? r['VALOR'] ?? r['Vr. Total ($)'] ?? r['Total'] ?? '')
+      trendMap[mes].anterior    += parseNum(r['Vr. con IVA ($)'] ?? r['Valor Bruto ($)'] ?? '')
       trendMap[mes].anteriorUnd += parseNum(r['Cantidad'] ?? r['CANTIDAD'] ?? '')
     }
   })
