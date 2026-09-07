@@ -252,7 +252,7 @@ export function filtrarVentasPorAño(matriz: string[][], año: number): string[]
 const HEADERS_CARTERA = [
   'NIT', 'Cliente', 'Zona', 'Ciudad', 'Teléfono', 'Dirección', 'Tipo', 'Factura',
   'Fecha Factura', 'Fecha Vence', 'Días', 'Días Desde Factura',
-  'Días Vencido (Sistema)', 'Bucket', 'Estado', 'Total ($)', 'Abonos ($)',
+  'Días Vencido (Sistema)', 'Bucket', 'Estado', 'Total ($)', 'Abonado ($)',
   'Saldo ($)', 'Cód. Vendedor', 'Vendedor', 'Alerta',
 ]
 
@@ -306,7 +306,9 @@ export function adaptCartera(rows: string[][], corte: Date): string[][] {
       // de aquí: ambas se contradicen en decenas de facturas.
       'Estado':         t(r['ESTADO']),
       'Total ($)':      n(r['TOTAL']),
-      'Abonos ($)':     n(r['ABONA']),
+      // 'Abonado ($)', no 'Abonos ($)': es el nombre que emitía la hoja anterior
+      // y el que leen CarteraInteractivo y el detalle de gestión de cartera.
+      'Abonado ($)':    n(r['ABONA']),
       'Saldo ($)':      n(r['CANCELA']),
       'Cód. Vendedor':  cod(r['VENDEDOR']),
       'Vendedor':       t(r['NVENDEDOR']),

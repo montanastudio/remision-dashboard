@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { resolverArchivos } from '@/lib/drive-raw'
+import { getSheetData } from '@/lib/sheets'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,6 +40,17 @@ export async function GET() {
       present: !!process.env.NEXTAUTH_URL,
       value:   process.env.NEXTAUTH_URL ?? '—',
     },
+    // Carpeta de Drive con los archivos crudos del día. Sin esta variable, las
+    // hojas RAW_* vuelven a salir del spreadsheet — y ahí RAW_Cartera está
+    // vacía, así que cartera aparece en cero sin ningún error visible.
+    GOOGLE_DRIVE_RAW_FOLDER_ID: {
+      present: !!process.env.GOOGLE_DRIVE_RAW_FOLDER_ID,
+      length:  (process.env.GOOGLE_DRIVE_RAW_FOLDER_ID ?? '').length,
+    },
+    GOOGLE_SHEETS_ID_CONFIG: {
+      present: !!process.env.GOOGLE_SHEETS_ID_CONFIG,
+      length:  (process.env.GOOGLE_SHEETS_ID_CONFIG ?? '').length,
+    },
   }
 
   // Intentar conexión real a Google Sheets
@@ -61,5 +74,31 @@ export async function GET() {
     sheetsTest = { ok: false, error: String(e).slice(0, 300) }
   }
 
-  return NextResponse.json({ diagnosis, sheetsTest })
+  // ── De dónde están saliendo realmente los datos ──────────────────────
+  let fuenteDatos: Record<string, unknown> = { usandoCarpeta: false }
+  if (process.env.GOOGLE_DRIVE_RAW_FOLDER_ID) {
+    try {
+      const mapa = await resolverArchivos(true)
+      const archivos: Record<string, string> = {}
+      mapa.forEach(a => {
+        archivos[a.categoria] = `${a.nombre} · ${a.formato} · corte ${a.corte.toISOString().slice(0, 10)}`
+      })
+      fuenteDatos = { usandoCarpeta: true, archivos, encontrados: Object.keys(archivos).length }
+    } catch (e) {
+      fuenteDatos = { usandoCarpeta: true, error: String(e).slice(0, 300) }
+    }
+  }
+
+  // Conteos reales, que es lo que delata una hoja vacía
+  const conteos: Record<string, string> = {}
+  for (const hoja of ['RAW_Cartera', 'RAW_Ventas', 'RAW_Recibos'] as const) {
+    try {
+      const filas = await getSheetData(hoja)
+      conteos[hoja] = `${Math.max(filas.length - 1, 0)} filas`
+    } catch (e) {
+      conteos[hoja] = 'ERROR: ' + String(e).slice(0, 200)
+    }
+  }
+
+  return NextResponse.json({ diagnosis, sheetsTest, fuenteDatos, conteos })
 }
